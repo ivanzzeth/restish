@@ -1883,6 +1883,11 @@ func (c *CLI) applyAPIProfile(rawURL, profileName string, opts request.Options, 
 		if opts.ClientKeyPath == "" {
 			opts.ClientKeyPath = match.profile.ClientKeyPath
 		}
+		if match.profile.Browser {
+			opts.Browser = true
+			opts.BrowserPort = match.profile.BrowserPort
+			opts.BrowserTarget = match.apiName
+		}
 	}
 	if match.apiName != "" {
 		opts.CacheNamespace = c.apiCacheNamespace(match.apiName, profileName)

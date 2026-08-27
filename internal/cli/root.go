@@ -93,6 +93,7 @@ func (c *CLI) newRootCmd() *cobra.Command {
 	c.addDoctorCommand(root)
 	c.addPluginCommand(root)
 	c.addCommandPlugins(root)
+	c.addBrowserTransportCommand(root)
 	c.setupMarkdownHelp(root)
 	return root
 }

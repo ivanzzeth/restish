@@ -161,6 +161,15 @@ type ProfileConfig struct {
 	// Credentials maps operation credential requirement IDs to auth
 	// configurations that satisfy them.
 	Credentials map[string]*CredentialConfig `json:"credentials,omitempty"`
+	// Browser, when true, routes requests through a local browser-backed
+	// forwarder (open-surface reverse forward) instead of a bare HTTP client.
+	// The browser issues the request from a real page context, carrying its TLS
+	// fingerprint, cookies, and login state, so sites protected by anti-bot
+	// layers respond to the CLI. Site-agnostic: enabled for any API that needs
+	// it, and harmless for sites without protection.
+	Browser bool `json:"browser,omitempty"`
+	// BrowserPort pins the forwarder port; 0 lets Restish pick a free one.
+	BrowserPort int `json:"browser_port,omitempty"`
 }
 
 // CredentialConfig binds a local auth configuration to a generated operation

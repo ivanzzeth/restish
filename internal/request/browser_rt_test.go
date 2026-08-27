@@ -1,0 +1,216 @@
+// Tests for the browser-backed transport protocol (serialization / response
+// assembly). The forwarder subprocess is NOT spawned here: the round tripper
+// is pre-marked ready pointing at a local httptest server that plays the
+// forwarder role, so the Go<->JSON protocol is exercised without a browser.
+
+package request
+
+import (
+	"encoding/base64"
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+)
+
+// ready marks a round tripper as initialized without spawning a subprocess.
+func (t *BrowserRoundTripper) ready(port int) {
+	t.once.Do(func() {}) // mark start() as done (no-op)
+	t.port = port
+}
+
+// TestBuildTransportRetryWrapsBrowser guards the layering in BuildTransport:
+// when both browser transport and retry are enabled, the retry layer must wrap
+// the browser round tripper (not the raw net/http base), otherwise requests
+// bypass the browser and get blocked by site risk control.
+func TestBuildTransportRetryWrapsBrowser(t *testing.T) {
+	opts := Options{Browser: true, BrowserTarget: "mysite", Retry: 3, NoCache: true}
+	tr := BuildTransport(opts)
+	rt, ok := tr.(retryTransport)
+	if !ok {
+		t.Fatalf("expected retryTransport layer, got %T", tr)
+	}
+	if _, ok := rt.inner.(*BrowserRoundTripper); !ok {
+		t.Fatalf("retry inner must be *BrowserRoundTripper, got %T", rt.inner)
+	}
+}
+
+// TestBuildTransportNoRetryUsesBrowser ensures that without retry the browser
+// round tripper is the transport handed out directly.
+func TestBuildTransportNoRetryUsesBrowser(t *testing.T) {
+	opts := Options{Browser: true, BrowserTarget: "mysite", NoCache: true}
+	tr := BuildTransport(opts)
+	if _, ok := tr.(*BrowserRoundTripper); !ok {
+		t.Fatalf("expected *BrowserRoundTripper, got %T", tr)
+	}
+}
+
+func TestBrowserRoundTripperProtocol(t *testing.T) {
+	var got struct {
+		Method  string            `json:"method"`
+		URL     string            `json:"url"`
+		Headers map[string]string `json:"headers"`
+		Body    string            `json:"body"`
+		Target  string            `json:"target"`
+	}
+	bodyB64 := base64.StdEncoding.EncodeToString([]byte(`{"q":1}`))
+
+	fwd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/request" {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Errorf("decode payload: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"status": 200,
+			"status_text": "OK",
+			"headers": {"content-type": "application/json", "x-flag": "a"},
+			"body": "` + base64.StdEncoding.EncodeToString([]byte(`{"ok":true}`)) + `"
+		}`))
+	}))
+	defer fwd.Close()
+
+	port := strings.TrimPrefix(fwd.URL, "http://127.0.0.1:")
+	rt := NewBrowserRoundTripper(BrowserRoundTripperConfig{Target: "mysite"})
+	rt.ready(atoiSafe(port))
+
+	req, err := http.NewRequest(http.MethodPost, "https://api.example.com/v1/things", strings.NewReader(`{"q":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("X-Custom", "abc")
+
+	resp, err := rt.RoundTrip(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if got.Method != http.MethodPost {
+		t.Errorf("method = %q, want POST", got.Method)
+	}
+	if got.URL != "https://api.example.com/v1/things" {
+		t.Errorf("url = %q", got.URL)
+	}
+	if got.Target != "mysite" {
+		t.Errorf("target = %q", got.Target)
+	}
+	if got.Headers["X-Custom"] != "abc" {
+		t.Errorf("headers = %#v", got.Headers)
+	}
+	if got.Body != bodyB64 {
+		t.Errorf("body = %q, want %q", got.Body, bodyB64)
+	}
+
+	if resp.StatusCode != 200 {
+		t.Errorf("status = %d", resp.StatusCode)
+	}
+	if resp.Header.Get("x-flag") != "a" {
+		t.Errorf("response header x-flag missing")
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != `{"ok":true}` {
+		t.Errorf("response body = %q", string(body))
+	}
+	if resp.ContentLength != int64(len(body)) {
+		t.Errorf("content length = %d, want %d", resp.ContentLength, len(body))
+	}
+}
+
+func TestBrowserRoundTripperPassesThroughStatus(t *testing.T) {
+	fwd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"status": 406, "status_text": "Not Acceptable", "headers": {}, "body": ""}`))
+	}))
+	defer fwd.Close()
+
+	port := strings.TrimPrefix(fwd.URL, "http://127.0.0.1:")
+	rt := NewBrowserRoundTripper(BrowserRoundTripperConfig{Target: "x"})
+	rt.ready(atoiSafe(port))
+
+	req, _ := http.NewRequest(http.MethodGet, "https://api.example.com/v1/me", nil)
+	resp, err := rt.RoundTrip(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 406 {
+		t.Errorf("status = %d, want 406 (status codes must pass through)", resp.StatusCode)
+	}
+}
+
+// TestBrowserRoundTripperStripsBodyEncodingHeaders guards the gzip fix: the
+// forwarder returns an already-decoded body (the browser's fetch decompressed
+// it), so a Content-Encoding/Content-Length describing the original wire form
+// must not survive — otherwise the client tries to gunzip plaintext
+// ("gzip: invalid header") or truncates to the compressed length.
+func TestBrowserRoundTripperStripsBodyEncodingHeaders(t *testing.T) {
+	plain := `{"ok":true,"note":"decoded"}`
+	fwd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"status": 200,
+			"headers": {
+				"Content-Type": "application/json",
+				"Content-Encoding": "gzip",
+				"Content-Length": "17",
+				"Transfer-Encoding": "chunked",
+				"X-Keep": "y"
+			},
+			"body": "` + base64.StdEncoding.EncodeToString([]byte(plain)) + `"
+		}`))
+	}))
+	defer fwd.Close()
+
+	port := strings.TrimPrefix(fwd.URL, "http://127.0.0.1:")
+	rt := NewBrowserRoundTripper(BrowserRoundTripperConfig{Target: "mysite"})
+	rt.ready(atoiSafe(port))
+
+	req, _ := http.NewRequest(http.MethodGet, "https://api.example.com/x", nil)
+	resp, err := rt.RoundTrip(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if got := resp.Header.Get("Content-Encoding"); got != "" {
+		t.Errorf("Content-Encoding must be stripped, got %q", got)
+	}
+	if got := resp.Header.Get("Transfer-Encoding"); got != "" {
+		t.Errorf("Transfer-Encoding must be stripped, got %q", got)
+	}
+	if resp.Header.Get("X-Keep") != "y" {
+		t.Errorf("unrelated header X-Keep must survive")
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(body) != plain {
+		t.Errorf("body = %q, want %q", string(body), plain)
+	}
+	// Content-Length must reflect the decoded body, not the stale "17".
+	if resp.ContentLength != int64(len(plain)) {
+		t.Errorf("content length = %d, want %d", resp.ContentLength, len(plain))
+	}
+	if resp.Header.Get("Content-Length") != "" && resp.Header.Get("Content-Length") == "17" {
+		t.Errorf("stale Content-Length 17 must not survive")
+	}
+}
+
+func atoiSafe(s string) int {
+	n := 0
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			continue
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n
+}

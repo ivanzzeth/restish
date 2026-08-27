@@ -199,6 +199,17 @@ type Options struct {
 	// requests with the same options (e.g. pagination) should pre-build one via
 	// BuildTransport and set it here so connection pools are reused.
 	Transport http.RoundTripper
+	// Browser, when true, routes requests through a local browser-backed
+	// forwarder (open-surface reverse forward) instead of the net/http
+	// transport. The request is issued from a real browser page context, so the
+	// target site sees the browser's TLS fingerprint, cookies, and login state.
+	Browser bool
+	// BrowserPort pins the forwarder port; 0 lets the round tripper pick a
+	// free port.
+	BrowserPort int
+	// BrowserTarget names the open-surface artifact (session) whose browser
+	// profile serves this API.
+	BrowserTarget string
 }
 
 // Do executes an HTTP request and returns the response.
@@ -645,14 +656,26 @@ func BuildTransport(opts Options) http.RoundTripper {
 			return nil, err
 		})
 	}
-	// Wrap with retry if requested.
+	// Route through the browser-backed forwarder when enabled. The browser
+	// transport replaces the net/http transport as the actual network layer;
+	// retry, cache, and response hooks still wrap it and behave as usual.
 	var inner http.RoundTripper = base
+	if opts.Browser {
+		inner = NewBrowserRoundTripper(BrowserRoundTripperConfig{
+			Target: opts.BrowserTarget,
+			Port:   opts.BrowserPort,
+			Logger: opts.Logger,
+		})
+	}
+	// Wrap with retry if requested. The retry layer must wrap the current
+	// inner transport (the browser forwarder when enabled), not the raw base,
+	// so retried requests still go through the browser-backed network path.
 	if opts.Retry > 0 {
 		delay := opts.RetryBaseDelay
 		if delay == 0 {
 			delay = time.Second
 		}
-		inner = retryTransport{inner: base, maxRetry: opts.Retry, retryUnsafe: opts.RetryUnsafe, baseDelay: delay, maxWait: opts.RetryMaxWait, logger: opts.Logger}
+		inner = retryTransport{inner: inner, maxRetry: opts.Retry, retryUnsafe: opts.RetryUnsafe, baseDelay: delay, maxWait: opts.RetryMaxWait, logger: opts.Logger}
 	}
 
 	if opts.NoCache || opts.CacheDir == "" {
