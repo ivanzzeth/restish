@@ -162,7 +162,7 @@ type ProfileConfig struct {
 	// configurations that satisfy them.
 	Credentials map[string]*CredentialConfig `json:"credentials,omitempty"`
 	// Browser, when true, routes requests through a local browser-backed
-	// forwarder (open-surface reverse forward) instead of a bare HTTP client.
+	// forwarder (open-surface debug forward) instead of a bare HTTP client.
 	// The browser issues the request from a real page context, carrying its TLS
 	// fingerprint, cookies, and login state, so sites protected by anti-bot
 	// layers respond to the CLI. Site-agnostic: enabled for any API that needs

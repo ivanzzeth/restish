@@ -200,7 +200,7 @@ type Options struct {
 	// BuildTransport and set it here so connection pools are reused.
 	Transport http.RoundTripper
 	// Browser, when true, routes requests through a local browser-backed
-	// forwarder (open-surface reverse forward) instead of the net/http
+	// forwarder (open-surface debug forward) instead of the net/http
 	// transport. The request is issued from a real browser page context, so the
 	// target site sees the browser's TLS fingerprint, cookies, and login state.
 	Browser bool

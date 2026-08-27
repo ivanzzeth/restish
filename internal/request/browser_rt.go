@@ -3,7 +3,7 @@
 // Restish has no per-request hook/rewrite mechanism, and a bare net/http
 // client is often blocked by anti-bot layers. This round tripper instead
 // forwards each request over loopback to a local browser-backed forwarder
-// (open-surface's `reverse forward`), which issues the request from a real
+// (open-surface's `debug forward`), which issues the request from a real
 // browser page context — carrying the browser's TLS fingerprint, cookies, and
 // login state. Any site a browser can reach can therefore be requested by the
 // generated CLI.
