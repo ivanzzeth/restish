@@ -185,11 +185,17 @@ paths:
 
 	listResult := responses[1]["result"].(map[string]any)
 	tools := listResult["tools"].([]any)
-	if len(tools) != 1 {
-		t.Fatalf("expected 1 visible tool, got %d", len(tools))
+	if len(tools) != 3 {
+		t.Fatalf("expected complete OpenAPI inventory, got %d", len(tools))
 	}
-	if got := tools[0].(map[string]any)["name"].(string); got != "get-item" {
-		t.Fatalf("expected get-item tool, got %q", got)
+	names := make(map[string]bool, len(tools))
+	for _, item := range tools {
+		names[item.(map[string]any)["name"].(string)] = true
+	}
+	for _, name := range []string{"get-item", "hidden-cli", "hidden-mcp"} {
+		if !names[name] {
+			t.Fatalf("expected %s in complete inventory, got %#v", name, names)
+		}
 	}
 
 	callResult := responses[2]["result"].(map[string]any)

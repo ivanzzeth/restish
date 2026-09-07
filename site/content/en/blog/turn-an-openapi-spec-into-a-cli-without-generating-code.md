@@ -309,10 +309,10 @@ clients, the `restish-mcp` plugin can expose registered operations as tools:
 restish mcp serve example
 ```
 
-That does not mean every endpoint should be exposed to every model, user, or
-profile. Restish keeps MCP conservative by default: read-oriented tools are
-shown first, write tools require explicit opt-in, and operations can be
-allowlisted or hidden.
+That does not mean every operation may run for every model, user, or profile.
+Restish shows the complete OpenAPI inventory so discovery cannot be confused
+with authorization. Write calls still require explicit opt-in or a stronger
+outer authorization broker before Restish sends HTTP.
 
 The important part is that both interfaces use the same source of truth. The
 OpenAPI document describes the API. Restish profiles carry local auth and

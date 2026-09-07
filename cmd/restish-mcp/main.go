@@ -51,21 +51,16 @@ func main() {
 	cfg, err := ParseArgs(args)
 	if err == nil {
 		var tools []*Tool
-		var stats ToolLoadStats
-		tools, stats, err = LoadToolsWithStats(client.fetchSpecSync, cfg.APINames, cfg.Options)
+		tools, err = LoadTools(client.fetchSpecSync, cfg.APINames, cfg.Options)
 		if err == nil {
-			if stats.HiddenWriteOperations > 0 {
-				_ = plugin.WriteMessage(os.Stdout, plugin.StderrDataMsg{
-					Type: plugin.MsgTypeStderrData,
-					Data: []byte(fmt.Sprintf("mcp: hid %d write operation(s); pass --allow-write-tools to expose POST, PUT, PATCH, and DELETE\n", stats.HiddenWriteOperations)),
-				})
-			}
 			server := &Server{
-				Tools:          tools,
-				ToolIndex:      indexTools(tools),
-				Exec:           client.do,
-				MaxResultBytes: cfg.Options.MaxResultBytes,
-				RequestTimeout: cfg.Options.RequestTimeout,
+				Tools:           tools,
+				ToolIndex:       indexTools(tools),
+				Exec:            client.do,
+				MaxResultBytes:  cfg.Options.MaxResultBytes,
+				RequestTimeout:  cfg.Options.RequestTimeout,
+				ReadOnly:        cfg.Options.ReadOnly,
+				AllowWriteTools: cfg.Options.AllowWriteTools,
 			}
 			if server.MaxResultBytes <= 0 {
 				server.MaxResultBytes = DefaultMaxResultBytes
@@ -99,11 +94,11 @@ func helpText(args []string) (string, bool) {
 }
 
 func rootHelpText() string {
-	return "Expose registered APIs as MCP tools via Restish-authenticated HTTP delegation.\n\nUse `restish mcp serve <api...>` from an MCP client command configuration. Restish loads each registered API's OpenAPI operations and forwards tool calls through the same auth, profile, TLS, and request pipeline as the CLI. By default it exposes read-oriented tools; pass `--allow-write-tools` only for MCP clients and models you trust to mutate the selected APIs.\n\nUsage:\n  restish mcp [command]\n\nAvailable Commands:\n  serve    Serve registered APIs over stdio\n\nExamples:\n  restish mcp serve github\n  restish mcp serve github --operations listIssues,getIssue\n  restish mcp serve github --allow-write-tools\n\nFlags:\n  -h, --help   help for mcp\n\nUse \"restish mcp [command] --help\" for more information about a command.\n"
+	return "Expose registered APIs as MCP tools via Restish-authenticated HTTP delegation.\n\nUse `restish mcp serve <api...>` from an MCP client command configuration. Restish lists every OpenAPI operation and forwards authorized tool calls through the same auth, profile, TLS, and request pipeline as the CLI. Write calls remain disabled until `--allow-write-tools` is set; this execution gate never hides tools from discovery.\n\nUsage:\n  restish mcp [command]\n\nAvailable Commands:\n  serve    Serve registered APIs over stdio\n\nExamples:\n  restish mcp serve github\n  restish mcp serve github --allow-write-tools\n\nFlags:\n  -h, --help   help for mcp\n\nUse \"restish mcp [command] --help\" for more information about a command.\n"
 }
 
 func serveHelpText() string {
-	return "Serve registered APIs over the Model Context Protocol.\n\nBy default, Restish exposes read-oriented tools and hides write operations. Use `--allow-write-tools` only for MCP clients and models you trust to make `POST`, `PUT`, `PATCH`, and `DELETE` calls against the selected APIs.\n\nUsage:\n  restish mcp serve [flags] <api...>\n\nExamples:\n  restish mcp serve github\n  restish mcp serve github stripe --operations listIssues,getCustomer\n  restish mcp serve github --allow-write-tools\n\nFlags:\n  --operations string        Comma-separated operationId allowlist\n  --max-result-bytes int     Maximum tool result payload size\n  --request-timeout int      Per-tool HTTP request timeout in seconds (0 disables)\n  --read-only                Expose only GET/HEAD operations\n  --allow-write-tools        Expose POST, PUT, PATCH, and DELETE operations as MCP tools\n  -h, --help                 help for serve\n"
+	return "Serve registered APIs over the Model Context Protocol.\n\nDiscovery always lists every OpenAPI operation. By default, calls to POST, PUT, PATCH, and DELETE tools are rejected. Use `--allow-write-tools` only when an outer authorization boundary or trusted operator controls mutations; use `--read-only` to reject every call except GET and HEAD. Neither flag changes tools/list.\n\nUsage:\n  restish mcp serve [flags] <api...>\n\nExamples:\n  restish mcp serve github\n  restish mcp serve github --allow-write-tools\n\nFlags:\n  --max-result-bytes int     Maximum tool result payload size\n  --request-timeout int      Per-tool HTTP request timeout in seconds (0 disables)\n  --read-only                Reject calls other than GET/HEAD operations\n  --allow-write-tools        Permit calls to POST, PUT, PATCH, and DELETE operations\n  -h, --help                 help for serve\n"
 }
 
 const stdinForwardQueueSize = 64

@@ -333,6 +333,7 @@ func (c *CLI) handlePluginAPISpec(ctx context.Context, cmd *cobra.Command, write
 		BaseURL:         effectiveProfileBaseURL(apiCfg, profileName),
 		OperationBase:   effectiveOperationBase(apiCfg, profileName),
 		ServerVariables: effectiveServerVariables(apiCfg, profileName),
+		IncludeIgnored:  true,
 	})
 	if err != nil {
 		return writer.WriteMessage(pluginwire.APISpecResponseMsg{
@@ -363,9 +364,6 @@ func pluginOperationsFromSpec(ops []spec.Operation, operationBase string) []plug
 	for _, op := range ops {
 		params := make([]pluginwire.APIParam, 0, len(op.Parameters))
 		for _, p := range op.Parameters {
-			if p.XCLI.Ignore {
-				continue
-			}
 			params = append(params, pluginwire.APIParam{
 				Name:             p.Name,
 				In:               p.In,

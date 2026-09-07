@@ -11,15 +11,36 @@ then delegate actual HTTP execution back to Restish.
 
 The product positioning is deliberately narrow: use Restish itself for precise
 human CLI calls, and use `restish-mcp` when an MCP client or agent should see
-selected OpenAPI operations as tools.
+the OpenAPI operation inventory as tools.
+
+## Product Frame
+
+Problem: an API integrator cannot tell whether a missing MCP tool means the
+upstream contract lacks the operation or a local presentation filter hid it.
+That ambiguity also makes automatic contract refresh incomplete.
+
+Goals:
+
+- make `tools/list` a complete, deterministic projection of OpenAPI operations
+- keep discovery separate from permission to execute state-changing requests
+- retain exact Restish profile, auth, TLS, and request-pipeline behavior
+
+Non-goals:
+
+- treating tool visibility as an authorization mechanism
+- inventing per-operation policy configuration in this bridge
+
+The primary workflow is to list the complete contract, inspect standard MCP
+effect annotations, and authorize a concrete call at the execution boundary.
+Restish's standalone safety flags reject calls; they never rewrite inventory.
 
 ## Goals
 
 - expose API operations as MCP tools without duplicating Restish's HTTP stack
-- make tool naming and filtering predictable
+- make complete tool naming predictable
 - keep the plugin a protocol bridge rather than a second API client
 - preserve Restish auth, TLS, retry, cache, and profile behavior for tool calls
-- keep the MCP surface intentionally small and operator-friendly
+- keep the MCP protocol surface intentionally small and operator-friendly
 
 ## Non-Goals
 
@@ -98,9 +119,8 @@ Flags:
 
 | Flag | Meaning |
 | --- | --- |
-| `--operations <id,id>` | Allowlist operation IDs before tool registration. |
-| `--read-only` | Expose only `GET` and `HEAD`, even if write tools are otherwise allowed. |
-| `--allow-write-tools` | Expose `POST`, `PUT`, `PATCH`, and `DELETE` operations. |
+| `--read-only` | Reject calls other than `GET` and `HEAD`; does not alter `tools/list`. |
+| `--allow-write-tools` | Permit calls to `POST`, `PUT`, `PATCH`, and `DELETE`; does not alter `tools/list`. |
 | `--max-result-bytes <n>` | Truncate MCP text results after this many bytes; default is 16 KiB. |
 | `--request-timeout <seconds>` | Per-tool delegated HTTP timeout; default is 60 seconds, `0` disables the local plugin timeout. |
 
@@ -108,39 +128,38 @@ Flags:
 HTTP transport returns later, it should be designed as a new explicit service
 mode rather than kept as a hidden compatibility flag.
 
-## Tool Inclusion Rules
+## Complete Inventory And Execution Policy
 
-`restish-mcp` only exposes operations that have a stable operation identity.
-Today that means an operation must have an `operationId`.
+`tools/list` contains every HTTP operation in the effective OpenAPI document.
+`x-cli-ignore` remains a CLI presentation instruction and `x-mcp-ignore` is
+retained as source metadata; neither removes an operation from MCP discovery.
+An operation without `operationId` receives a stable method/path-derived name.
+Duplicate names are deterministically disambiguated so the runtime index cannot
+silently replace one operation with another.
 
-Operations are skipped when:
+MCP effect annotations describe whether the HTTP method is read-only,
+idempotent, or destructive. These are descriptors, not grants.
 
-- `x-cli-ignore` is true
-- `x-mcp-ignore` is true
-- `--read-only` is set and the method is not `GET` or `HEAD`
-- the method is `POST`, `PUT`, `PATCH`, or `DELETE` and
-  `--allow-write-tools` is not set
-- `--operations` is set and the `operationId` is not allowlisted
-
-This is a product decision, not just a parser shortcut. The plugin wants stable
-tool names that API authors can reason about.
-
-MCP is model-facing automation, so it is read-biased by default. Write-like
-operations must require an explicit operator choice even when the OpenAPI spec
-describes them correctly. Explicit hide metadata such as `x-mcp-ignore` remains
-authoritative. If `--read-only` and `--allow-write-tools` are both supplied,
-read-only wins; this keeps the safer flag dominant in generated MCP client
-configuration.
+Execution is a separate boundary. By default, the standalone bridge rejects
+`POST`, `PUT`, `PATCH`, and `DELETE` calls while continuing to list them.
+`--allow-write-tools` permits those concrete calls. `--read-only` rejects every
+call except `GET` and `HEAD` and wins when both flags are present. A host with a
+stronger exact-call authorization broker may pass `--allow-write-tools` and
+enforce approval immediately before delegated HTTP execution.
 
 ## Tool Naming
 
-When serving one API, tool names are based directly on `operationId`.
+When serving one API, tool names use `operationId` when present. Operations
+without one use a readable method/path slug plus a short method/path digest.
 
 When serving multiple APIs, tool names are namespaced as:
 
 - `<apiName>__<operationId>`
 
 That avoids collisions while keeping single-API use ergonomic.
+
+If two operations still claim the same resulting name, both receive a stable
+method/path suffix. Inventory construction must never rely on map overwrite.
 
 The separator and naming rule should stay deterministic so operators and MCP
 clients can rely on tool identity across runs.

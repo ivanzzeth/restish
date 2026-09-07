@@ -63,6 +63,9 @@ Generated from production source environment-variable usage plus Go's standard p
 | --- | --- | --- |
 | `RSH_COMMAND_PLUGIN_DISCOVERY_TIMEOUT` | Override command-plugin startup discovery timeout. | plugin runtime |
 | `RSH_COMMAND_PLUGIN_SHUTDOWN_GRACE` | Override command-plugin shutdown grace period. | plugin runtime |
+| `OPEN_SURFACE_PYTHON` | Explicit Python interpreter for the optional open-surface browser transport. | browser transport |
+| `OPEN_SURFACE_ROOT` | Project root used to locate the open-surface virtual-environment interpreter. | browser transport |
+| `VIRTUAL_ENV` | Active Python virtual environment considered by the open-surface browser transport. | browser transport |
 
 ### Plugin Installation
 

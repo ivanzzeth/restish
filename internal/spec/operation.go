@@ -247,7 +247,7 @@ func (s *APISpec) buildOperations(opts OperationOptions) ([]Operation, []string,
 		if pathItem == nil {
 			continue
 		}
-		if PathItemExtBool(pathItem, "x-cli-ignore") {
+		if PathItemExtBool(pathItem, "x-cli-ignore") && !opts.IncludeIgnored {
 			continue
 		}
 		pathHidden := PathItemExtBool(pathItem, "x-cli-hidden")
@@ -280,7 +280,7 @@ func (s *APISpec) buildOperations(opts OperationOptions) ([]Operation, []string,
 			fullPath := joinOperationPath(basePath, rawPath)
 			op := extractOperation(mo.Method, fullPath, pathParams, mo.Op, model.Model.Security, securitySchemes(model.Model.Components), openAPIJSONSchemaDialect(model.Model))
 			op.OperationServer = operationServer
-			if op.XCLI.Ignore {
+			if op.XCLI.Ignore && !opts.IncludeIgnored {
 				continue
 			}
 			if pathHidden && !op.XCLI.Hidden {

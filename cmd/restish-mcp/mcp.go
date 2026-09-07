@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"strings"
 )
 
 const DefaultMaxResultBytes = 16 * 1024
@@ -47,16 +46,14 @@ func ParseArgs(args []string) (*ServeConfig, error) {
 	args = args[1:]
 	fs := flag.NewFlagSet("mcp", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	var operations string
 	var maxResultBytes int
 	var requestTimeout int
 	var readOnly bool
 	var allowWriteTools bool
-	fs.StringVar(&operations, "operations", "", "Comma-separated operationId allowlist")
 	fs.IntVar(&maxResultBytes, "max-result-bytes", DefaultMaxResultBytes, "Maximum tool result payload size")
 	fs.IntVar(&requestTimeout, "request-timeout", 60, "Per-tool HTTP request timeout in seconds (0 disables)")
-	fs.BoolVar(&readOnly, "read-only", false, "Expose only GET/HEAD operations")
-	fs.BoolVar(&allowWriteTools, "allow-write-tools", false, "Expose POST, PUT, PATCH, and DELETE operations as MCP tools")
+	fs.BoolVar(&readOnly, "read-only", false, "Reject calls other than GET/HEAD operations")
+	fs.BoolVar(&allowWriteTools, "allow-write-tools", false, "Permit calls to POST, PUT, PATCH, and DELETE operations")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
@@ -64,17 +61,9 @@ func ParseArgs(args []string) (*ServeConfig, error) {
 	if len(apiNames) == 0 {
 		return nil, errors.New("mcp serve requires at least one API name")
 	}
-	ops := map[string]bool{}
-	for _, item := range strings.Split(operations, ",") {
-		item = strings.TrimSpace(item)
-		if item != "" {
-			ops[item] = true
-		}
-	}
 	return &ServeConfig{
 		APINames: apiNames,
 		Options: Options{
-			Operations:      ops,
 			ReadOnly:        readOnly,
 			AllowWriteTools: allowWriteTools,
 			MaxResultBytes:  maxResultBytes,

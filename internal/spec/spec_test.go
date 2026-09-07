@@ -268,6 +268,40 @@ paths:
 	}
 }
 
+func TestOperationsCanRetainCLIHiddenInventoryForProtocolConsumers(t *testing.T) {
+	raw := []byte(`openapi: 3.1.0
+info: {title: Test, version: "1"}
+paths:
+  /path-hidden:
+    x-cli-ignore: true
+    get: {operationId: pathHidden}
+  /operation-hidden:
+    get:
+      operationId: operationHidden
+      x-cli-ignore: true
+  /visible:
+    get: {operationId: visible}
+`)
+	s, err := (OpenAPILoader{}).Load(raw)
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	visible, err := s.Operations(OperationOptions{})
+	if err != nil {
+		t.Fatalf("visible operations: %v", err)
+	}
+	if len(visible) != 1 || visible[0].ID != "visible" {
+		t.Fatalf("CLI operations = %#v", visible)
+	}
+	complete, err := s.Operations(OperationOptions{IncludeIgnored: true})
+	if err != nil {
+		t.Fatalf("complete operations: %v", err)
+	}
+	if len(complete) != 3 {
+		t.Fatalf("complete operations = %#v", complete)
+	}
+}
+
 func TestOpenAPILoader_Load_DescriptionRefObjectDoesNotFetchExternalDoc(t *testing.T) {
 	dir := t.TempDir()
 	specPath := filepath.Join(dir, "openapi.yaml")

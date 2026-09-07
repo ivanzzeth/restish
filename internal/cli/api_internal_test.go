@@ -54,7 +54,7 @@ func TestAPIConnectRemovedCommandNamesAllowed(t *testing.T) {
 
 // TestIsBuiltinCommandName verifies the helper covers the expected set of names.
 func TestIsBuiltinCommandName(t *testing.T) {
-	builtins := []string{"api", "cache", "cert", "completion", "config", "delete", "doctor", "edit", "get", "head", "help", "links", "options", "patch", "plugin", "post", "put", "shell", "version"}
+	builtins := []string{"api", "browser-transport", "cache", "cert", "completion", "config", "delete", "doctor", "edit", "get", "head", "help", "links", "options", "patch", "plugin", "post", "put", "shell", "version"}
 	for _, name := range builtins {
 		if !isBuiltinCommandName(name) {
 			t.Errorf("isBuiltinCommandName(%q) = false, want true", name)
@@ -91,7 +91,7 @@ func TestHiddenCompatibilityCommandsAreIntentional(t *testing.T) {
 			hiddenRoot = append(hiddenRoot, cmd.Name())
 		}
 	}
-	if got, want := strings.Join(hiddenRoot, ","), "completion"; got != want {
+	if got, want := strings.Join(hiddenRoot, ","), "browser-transport,completion"; got != want {
 		t.Fatalf("hidden root commands = %q, want %q", got, want)
 	}
 

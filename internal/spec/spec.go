@@ -80,6 +80,7 @@ type APIInfo struct {
 type opsKey struct {
 	baseURL, operationBase string
 	serverVariables        string
+	includeIgnored         bool
 }
 type opsEntry struct {
 	ops      []Operation
@@ -93,6 +94,9 @@ type OperationOptions struct {
 	OperationBase   string
 	ServerVariables map[string]string
 	Warnf           func(format string, args ...any)
+	// IncludeIgnored retains x-cli-ignore operations for non-CLI consumers that
+	// need the complete protocol inventory. CLI presentation still excludes them.
+	IncludeIgnored bool
 }
 
 func operationOptionsKey(opts OperationOptions) opsKey {
@@ -100,6 +104,7 @@ func operationOptionsKey(opts OperationOptions) opsKey {
 		baseURL:         opts.BaseURL,
 		operationBase:   opts.OperationBase,
 		serverVariables: ServerVariablesCacheKey(opts.ServerVariables),
+		includeIgnored:  opts.IncludeIgnored,
 	}
 }
 

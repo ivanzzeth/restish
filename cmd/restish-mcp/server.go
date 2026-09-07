@@ -19,11 +19,13 @@ const maxRPCHeaderLineBytes = 8 << 10
 const maxRPCHeaderBytes = 16 << 10
 
 type Server struct {
-	Tools          []*Tool
-	ToolIndex      map[string]*Tool
-	Exec           HTTPExecutor
-	MaxResultBytes int
-	RequestTimeout int
+	Tools           []*Tool
+	ToolIndex       map[string]*Tool
+	Exec            HTTPExecutor
+	MaxResultBytes  int
+	RequestTimeout  int
+	ReadOnly        bool
+	AllowWriteTools bool
 }
 
 type rpcRequest struct {
@@ -162,6 +164,7 @@ func (s *Server) handleRequest(req rpcRequest) rpcResponse {
 				"name":        tool.Name,
 				"description": tool.Description,
 				"inputSchema": tool.InputSchema,
+				"annotations": toolAnnotations(tool.Method),
 			})
 		}
 		resp.Result = map[string]any{"tools": tools}
@@ -192,6 +195,13 @@ func (s *Server) handleRequest(req rpcRequest) rpcResponse {
 }
 
 func (s *Server) callTool(tool *Tool, args map[string]any) (map[string]any, error) {
+	method := strings.ToUpper(tool.Method)
+	if s.ReadOnly && method != "GET" && method != "HEAD" {
+		return nil, fmt.Errorf("%s calls are disabled by --read-only", method)
+	}
+	if !s.AllowWriteTools && mcpWriteMethod(method) {
+		return nil, fmt.Errorf("%s calls require --allow-write-tools", method)
+	}
 	if args == nil {
 		args = map[string]any{}
 	}
@@ -216,6 +226,19 @@ func (s *Server) callTool(tool *Tool, args map[string]any) (map[string]any, erro
 		},
 		"isError": isError,
 	}, nil
+}
+
+func toolAnnotations(method string) map[string]any {
+	switch strings.ToUpper(method) {
+	case "GET", "HEAD", "OPTIONS", "TRACE":
+		return map[string]any{"readOnlyHint": true, "destructiveHint": false, "idempotentHint": true}
+	case "PUT":
+		return map[string]any{"readOnlyHint": false, "destructiveHint": false, "idempotentHint": true}
+	case "DELETE":
+		return map[string]any{"readOnlyHint": false, "destructiveHint": true, "idempotentHint": true}
+	default:
+		return map[string]any{"readOnlyHint": false, "destructiveHint": false, "idempotentHint": false}
+	}
 }
 
 func formatToolResult(resp *HTTPResponse, maxBytes int) (string, bool) {

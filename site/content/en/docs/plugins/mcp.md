@@ -29,8 +29,9 @@ restish mcp serve example
 The plugin reads the registered API spec, turns operations into MCP tools, and
 delegates HTTP execution back to Restish.
 
-The generated help below is the exact command reference, including write-tool
-opt-in, operation allowlists, timeouts, and result-size limits.
+The generated help below is the exact command reference, including write-call
+authorization, timeouts, and result-size limits. `tools/list` always reports
+the complete OpenAPI operation inventory.
 
 Tool arguments follow the OpenAPI parameter shape. Query arrays are sent as
 repeated query keys when the spec uses the usual `form` plus `explode: true`
@@ -48,7 +49,7 @@ Generated from the compiled `restish-mcp` plugin binary.
 ```text
 Expose registered APIs as MCP tools via Restish-authenticated HTTP delegation.
 
-Use `restish mcp serve <api...>` from an MCP client command configuration. Restish loads each registered API's OpenAPI operations and forwards tool calls through the same auth, profile, TLS, and request pipeline as the CLI. By default it exposes read-oriented tools; pass `--allow-write-tools` only for MCP clients and models you trust to mutate the selected APIs.
+Use `restish mcp serve <api...>` from an MCP client command configuration. Restish lists every OpenAPI operation and forwards authorized tool calls through the same auth, profile, TLS, and request pipeline as the CLI. Write calls remain disabled until `--allow-write-tools` is set; this execution gate never hides tools from discovery.
 
 Usage:
   restish mcp [command]
@@ -58,7 +59,6 @@ Available Commands:
 
 Examples:
   restish mcp serve github
-  restish mcp serve github --operations listIssues,getIssue
   restish mcp serve github --allow-write-tools
 
 Flags:
@@ -72,41 +72,39 @@ Use "restish mcp [command] --help" for more information about a command.
 ```text
 Serve registered APIs over the Model Context Protocol.
 
-By default, Restish exposes read-oriented tools and hides write operations. Use `--allow-write-tools` only for MCP clients and models you trust to make `POST`, `PUT`, `PATCH`, and `DELETE` calls against the selected APIs.
+Discovery always lists every OpenAPI operation. By default, calls to POST, PUT, PATCH, and DELETE tools are rejected. Use `--allow-write-tools` only when an outer authorization boundary or trusted operator controls mutations; use `--read-only` to reject every call except GET and HEAD. Neither flag changes tools/list.
 
 Usage:
   restish mcp serve [flags] <api...>
 
 Examples:
   restish mcp serve github
-  restish mcp serve github stripe --operations listIssues,getCustomer
   restish mcp serve github --allow-write-tools
 
 Flags:
-  --operations string        Comma-separated operationId allowlist
   --max-result-bytes int     Maximum tool result payload size
   --request-timeout int      Per-tool HTTP request timeout in seconds (0 disables)
-  --read-only                Expose only GET/HEAD operations
-  --allow-write-tools        Expose POST, PUT, PATCH, and DELETE operations as MCP tools
+  --read-only                Reject calls other than GET/HEAD operations
+  --allow-write-tools        Permit calls to POST, PUT, PATCH, and DELETE operations
   -h, --help                 help for serve
 ```
 <!-- END GENERATED -->
 
-## Hide Operations
+## Describe Operation Effects
 
-Use OpenAPI hints when some operations should not be exposed to MCP clients:
+Restish maps HTTP methods to standard MCP `readOnlyHint`, `idempotentHint`, and
+`destructiveHint` annotations. Clients and outer authorization brokers can use
+these descriptors when deciding whether a concrete call needs human approval.
 
-```yaml
-x-mcp-ignore: true
-```
-
-Use this for destructive, admin-only, or confusing operations.
+`x-cli-ignore` and `x-mcp-ignore` remain available as source metadata but do not
+remove an operation from `tools/list`. Tool visibility is not authorization.
 
 ## Good Fit
 
-MCP works well for APIs with clear operation IDs, descriptions, schemas, and
-safe auth profiles. It is a poor fit for APIs where operations are destructive
-without confirmation or where the spec hides important side effects.
+MCP works well for APIs with descriptions, schemas, and safe auth profiles.
+Operations without `operationId` receive a stable method/path-derived name. It
+is a poor fit when state-changing calls lack either trusted operator control or
+an outer exact-call authorization broker.
 
 OpenAPI parameters that use `content` keep their declared schema in MCP tools.
 For JSON parameter content, pass the native object, array, or scalar value and
@@ -117,9 +115,9 @@ Restish serializes it into the outgoing HTTP parameter.
 - Run `restish api sync <name>` after spec changes.
 - Confirm `restish <name> --help` shows generated operations.
 - Use `restish plugin debug` when plugin startup or messages fail.
-- Pass `--allow-write-tools` only when missing tools are write operations you
-  intentionally want to expose.
-- Hide operations in the spec rather than relying on MCP clients to avoid them.
+- If a write tool is listed but its call is rejected, opt in only when a trusted
+  operator or outer authorization broker controls the concrete request.
+- Use `--read-only` when every non-GET/HEAD call must be rejected.
 
 ## Related Pages
 

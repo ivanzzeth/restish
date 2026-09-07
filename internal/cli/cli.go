@@ -1182,7 +1182,7 @@ func commandPathExists(cmd *cobra.Command, args []string) bool {
 // is one of these, the fast-path skips API-name detection and loads all
 // configured APIs.
 var builtinCommands = map[string]bool{
-	"api": true, "cache": true, "cert": true, "completion": true, "config": true,
+	"api": true, "browser-transport": true, "cache": true, "cert": true, "completion": true, "config": true,
 	"delete": true, "doctor": true, "edit": true, "get": true, "head": true,
 	"help": true, "links": true, "options": true, "patch": true, "plugin": true,
 	"post": true, "put": true, "shell": true, "version": true,

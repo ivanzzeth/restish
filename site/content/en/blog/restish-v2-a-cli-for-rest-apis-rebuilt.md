@@ -263,9 +263,10 @@ The important part is not only "OpenAPI becomes tools." The important part is
 that those tools run through the same Restish request pipeline: profiles, auth,
 TLS, retries, timeouts, and output normalization.
 
-V2 also keeps the default conservative. MCP exposes read-oriented tools by
-default. Write operations require an explicit opt-in, and you can allowlist
-operations when a client should only see a subset of the API.
+MCP discovery lists the complete OpenAPI operation inventory, including write
+operations. Execution remains conservative: write calls require an explicit
+opt-in, or a stronger outer authorization broker, before Restish sends HTTP.
+This keeps “the API exists” separate from “this concrete call is approved.”
 
 ## Where Restish Fits
 

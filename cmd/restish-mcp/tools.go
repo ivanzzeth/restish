@@ -1,10 +1,12 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/pb33f/libopenapi"
 	v3high "github.com/pb33f/libopenapi/datamodel/high/v3"
@@ -53,119 +55,64 @@ type Param struct {
 }
 
 type Options struct {
-	Operations      map[string]bool
 	ReadOnly        bool
 	AllowWriteTools bool
 	MaxResultBytes  int
 	RequestTimeout  int
 }
 
-type ToolLoadStats struct {
-	HiddenWriteOperations int
-}
-
 func LoadTools(fetchSpec SpecFetcher, apiNames []string, opts Options) ([]*Tool, error) {
-	tools, _, err := LoadToolsWithStats(fetchSpec, apiNames, opts)
-	return tools, err
-}
-
-func LoadToolsWithStats(fetchSpec SpecFetcher, apiNames []string, opts Options) ([]*Tool, ToolLoadStats, error) {
 	multiAPI := len(apiNames) > 1
 	var tools []*Tool
-	var stats ToolLoadStats
 	for _, apiName := range apiNames {
 		s, err := fetchSpec(apiName)
 		if err != nil {
-			return nil, stats, err
+			return nil, err
 		}
-		apiTools, apiStats, err := toolsFromSpecWithStats(apiName, multiAPI, s, opts)
+		apiTools, err := toolsFromSpec(apiName, multiAPI, s, opts)
 		if err != nil {
-			return nil, stats, err
+			return nil, err
 		}
 		tools = append(tools, apiTools...)
-		stats.HiddenWriteOperations += apiStats.HiddenWriteOperations
 	}
+	disambiguateToolNames(tools)
 	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
-	return tools, stats, nil
+	return tools, nil
 }
 
-func toolsFromSpec(apiName string, multiAPI bool, s *APISpec, opts Options) ([]*Tool, error) {
-	tools, _, err := toolsFromSpecWithStats(apiName, multiAPI, s, opts)
-	return tools, err
-}
-
-func toolsFromSpecWithStats(apiName string, multiAPI bool, s *APISpec, opts Options) ([]*Tool, ToolLoadStats, error) {
+func toolsFromSpec(apiName string, multiAPI bool, s *APISpec, _ Options) ([]*Tool, error) {
 	if len(s.Operations) > 0 {
-		tools, stats := toolsFromOperations(apiName, multiAPI, s.Operations, opts)
-		return tools, stats, nil
+		return toolsFromOperations(apiName, multiAPI, s.Operations), nil
 	}
 	model, err := s.Document.BuildV3Model()
 	if err != nil || model == nil || model.Model.Paths == nil {
-		return nil, ToolLoadStats{}, fmt.Errorf("building OpenAPI model for %q: %w", apiName, err)
+		return nil, fmt.Errorf("building OpenAPI model for %q: %w", apiName, err)
 	}
 
 	var tools []*Tool
-	var stats ToolLoadStats
 	for path, pathItem := range model.Model.Paths.PathItems.FromOldest() {
 		for _, item := range spec.PathItemMethods(pathItem) {
-			if item.Op == nil || item.Op.OperationId == "" {
-				continue
-			}
-			if spec.OpExtBool(item.Op, "x-cli-ignore") || spec.OpExtBool(item.Op, "x-mcp-ignore") {
-				continue
-			}
-			if !mcpMethodAllowed(item.Method, opts) {
-				if mcpWriteMethod(item.Method) && !opts.AllowWriteTools {
-					stats.HiddenWriteOperations++
-				}
-				continue
-			}
-			if len(opts.Operations) > 0 && !opts.Operations[item.Op.OperationId] {
+			if item.Op == nil {
 				continue
 			}
 			tool, err := buildTool(apiName, multiAPI, path, item.Method, pathItem.Parameters, item.Op)
 			if err != nil {
-				return nil, stats, err
+				return nil, err
 			}
 			tools = append(tools, tool)
 		}
 	}
-	return tools, stats, nil
+	disambiguateToolNames(tools)
+	return tools, nil
 }
 
-func toolsFromOperations(apiName string, multiAPI bool, ops []plugin.APIOperation, opts Options) ([]*Tool, ToolLoadStats) {
+func toolsFromOperations(apiName string, multiAPI bool, ops []plugin.APIOperation) []*Tool {
 	var tools []*Tool
-	var stats ToolLoadStats
 	for _, op := range ops {
-		if op.ID == "" || op.MCPIgnore {
-			continue
-		}
-		if !mcpMethodAllowed(op.Method, opts) {
-			if mcpWriteMethod(op.Method) && !opts.AllowWriteTools {
-				stats.HiddenWriteOperations++
-			}
-			continue
-		}
-		if len(opts.Operations) > 0 && !opts.Operations[op.ID] {
-			continue
-		}
 		tools = append(tools, buildToolFromOperation(apiName, multiAPI, op))
 	}
-	return tools, stats
-}
-
-func mcpMethodAllowed(method string, opts Options) bool {
-	upper := strings.ToUpper(method)
-	if opts.ReadOnly {
-		return upper == "GET" || upper == "HEAD"
-	}
-	if opts.AllowWriteTools {
-		return true
-	}
-	if mcpWriteMethod(upper) {
-		return false
-	}
-	return true
+	disambiguateToolNames(tools)
+	return tools
 }
 
 func mcpWriteMethod(method string) bool {
@@ -178,7 +125,7 @@ func mcpWriteMethod(method string) bool {
 }
 
 func buildToolFromOperation(apiName string, multiAPI bool, op plugin.APIOperation) *Tool {
-	name := op.ID
+	name := operationToolName(op.ID, op.Method, op.Path)
 	if multiAPI {
 		name = apiName + "__" + name
 	}
@@ -291,7 +238,7 @@ func schemaFromOperationParam(p plugin.APIParam) map[string]any {
 }
 
 func buildTool(apiName string, multiAPI bool, path, method string, pathParams []*v3high.Parameter, op *v3high.Operation) (*Tool, error) {
-	name := op.OperationId
+	name := operationToolName(op.OperationId, method, path)
 	if multiAPI {
 		name = apiName + "__" + name
 	}
@@ -364,6 +311,54 @@ func buildTool(apiName string, multiAPI bool, path, method string, pathParams []
 		BodyContentType: bodyContentType,
 		BodyRequired:    bodyRequired,
 	}, nil
+}
+
+func operationToolName(operationID, method, path string) string {
+	if name := strings.TrimSpace(operationID); name != "" {
+		return name
+	}
+	var slug strings.Builder
+	lastUnderscore := false
+	for _, r := range strings.Trim(path, "/") {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			slug.WriteRune(unicode.ToLower(r))
+			lastUnderscore = false
+			continue
+		}
+		if !lastUnderscore {
+			slug.WriteByte('_')
+			lastUnderscore = true
+		}
+	}
+	base := strings.Trim(slug.String(), "_")
+	if base == "" {
+		base = "root"
+	}
+	if len(base) > 40 {
+		base = strings.TrimRight(base[:40], "_")
+	}
+	digest := sha256.Sum256([]byte(strings.ToUpper(method) + "\n" + path))
+	return strings.ToLower(method) + "_" + base + "_" + fmt.Sprintf("%x", digest[:4])
+}
+
+func disambiguateToolNames(tools []*Tool) {
+	counts := make(map[string]int, len(tools))
+	for _, tool := range tools {
+		counts[tool.Name]++
+	}
+	seen := make(map[string]int, len(tools))
+	for _, tool := range tools {
+		if counts[tool.Name] < 2 {
+			continue
+		}
+		seen[tool.Name]++
+		digest := sha256.Sum256([]byte(tool.APIName + "\n" + strings.ToUpper(tool.Method) + "\n" + tool.Path))
+		suffix := fmt.Sprintf("%x", digest[:4])
+		if seen[tool.Name] > 1 {
+			suffix += fmt.Sprintf("_%d", seen[tool.Name])
+		}
+		tool.Name += "__" + suffix
+	}
 }
 
 func requestBodyProperty(body *v3high.RequestBody) (string, map[string]any) {

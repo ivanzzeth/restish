@@ -22,7 +22,7 @@ func loadTestSpec(t *testing.T, name, raw string) *APISpec {
 	return &APISpec{Name: name, ContentType: "application/json", Raw: []byte(raw), Document: doc}
 }
 
-func TestToolsFromSpecFilteringAndNamespacing(t *testing.T) {
+func TestToolsFromSpecListsEveryOperationAndNamespaces(t *testing.T) {
 	s := loadTestSpec(t, "demo", `{
 	  "openapi": "3.1.0",
 	  "info": {"title": "Demo", "version": "1.0.0"},
@@ -71,8 +71,8 @@ func TestToolsFromSpecFilteringAndNamespacing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("toolsFromSpec: %v", err)
 	}
-	if len(tools) != 2 {
-		t.Fatalf("expected 2 visible tools, got %d", len(tools))
+	if len(tools) != 4 {
+		t.Fatalf("expected every operation, got %d", len(tools))
 	}
 
 	var create *Tool
@@ -93,7 +93,7 @@ func TestToolsFromSpecFilteringAndNamespacing(t *testing.T) {
 	}
 }
 
-func TestToolsFromSpecSkipsWriteOperationsByDefault(t *testing.T) {
+func TestToolsFromSpecAlwaysListsWriteOperations(t *testing.T) {
 	s := loadTestSpec(t, "demo", `{
 	  "openapi": "3.1.0",
 	  "info": {"title": "Demo", "version": "1.0.0"},
@@ -119,16 +119,8 @@ func TestToolsFromSpecSkipsWriteOperationsByDefault(t *testing.T) {
 	for _, tool := range tools {
 		names = append(names, tool.Name)
 	}
-	if strings.Join(names, ",") != "listItems,optionsItems" {
-		t.Fatalf("tools = %v, want listItems and optionsItems", names)
-	}
-
-	_, stats, err := toolsFromSpecWithStats("demo", false, s, Options{})
-	if err != nil {
-		t.Fatalf("toolsFromSpecWithStats: %v", err)
-	}
-	if stats.HiddenWriteOperations != 4 {
-		t.Fatalf("HiddenWriteOperations = %d, want 4", stats.HiddenWriteOperations)
+	if strings.Join(names, ",") != "listItems,createItem,replaceItem,patchItem,deleteItem,optionsItems" {
+		t.Fatalf("tools = %v, want complete method inventory", names)
 	}
 }
 
@@ -225,8 +217,8 @@ func TestToolsFromSpecPrefersHostResolvedOperations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("toolsFromSpec: %v", err)
 	}
-	if len(tools) != 1 || tools[0].Name != "getItem" {
-		t.Fatalf("expected only getItem, got %#v", tools)
+	if len(tools) != 3 || tools[0].Name != "getItem" || tools[1].Name != "hiddenMcp" || tools[2].Name != "createItem" {
+		t.Fatalf("expected complete host-resolved inventory, got %#v", tools)
 	}
 	req, err := tools[0].Request(map[string]any{"id": "a/b", "include": true})
 	if err != nil {
@@ -234,6 +226,63 @@ func TestToolsFromSpecPrefersHostResolvedOperations(t *testing.T) {
 	}
 	if req.URI != "demo/v2/items/a%2Fb?include=true" {
 		t.Fatalf("URI = %q, want demo/v2/items/a%%2Fb?include=true", req.URI)
+	}
+}
+
+func TestToolsFromSpecAssignsStableNameWithoutOperationID(t *testing.T) {
+	s := loadTestSpec(t, "demo", `{
+	  "openapi": "3.1.0",
+	  "info": {"title": "Demo", "version": "1.0.0"},
+	  "paths": {"/items/{id}": {"get": {}}}
+	}`)
+
+	tools, err := toolsFromSpec("demo", false, s, Options{})
+	if err != nil {
+		t.Fatalf("toolsFromSpec: %v", err)
+	}
+	if len(tools) != 1 || tools[0].Name != "get_items_id_d0bda1c3" {
+		if len(tools) == 1 {
+			t.Fatalf("unexpected fallback identity: %q", tools[0].Name)
+		}
+		t.Fatalf("unexpected fallback tool count: %d", len(tools))
+	}
+}
+
+func TestWriteExecutionGateDoesNotChangeInventory(t *testing.T) {
+	tool := &Tool{Name: "createItem", Method: "POST", Path: "/items"}
+	called := false
+	server := &Server{
+		Tools:     []*Tool{tool},
+		ToolIndex: indexTools([]*Tool{tool}),
+		Exec: func(*HTTPRequest) (*HTTPResponse, error) {
+			called = true
+			return &HTTPResponse{Status: 200}, nil
+		},
+	}
+
+	list := server.handleRequest(rpcRequest{JSONRPC: "2.0", ID: 1, HasID: true, Method: "tools/list"})
+	listed := list.Result.(map[string]any)["tools"].([]map[string]any)
+	if len(listed) != 1 || listed[0]["name"] != "createItem" {
+		t.Fatalf("write tool disappeared from inventory: %#v", listed)
+	}
+	call := server.handleRequest(rpcRequest{
+		JSONRPC: "2.0", ID: 2, HasID: true, Method: "tools/call",
+		Params: json.RawMessage(`{"name":"createItem","arguments":{}}`),
+	})
+	if call.Error == nil || !strings.Contains(call.Error.Message, "require --allow-write-tools") {
+		t.Fatalf("expected execution refusal, got %#v", call)
+	}
+	if called {
+		t.Fatal("execution gate ran HTTP request")
+	}
+}
+
+func TestToolAnnotationsDescribeMethodEffect(t *testing.T) {
+	if got := toolAnnotations("GET"); got["readOnlyHint"] != true || got["idempotentHint"] != true {
+		t.Fatalf("GET annotations = %#v", got)
+	}
+	if got := toolAnnotations("DELETE"); got["readOnlyHint"] != false || got["destructiveHint"] != true {
+		t.Fatalf("DELETE annotations = %#v", got)
 	}
 }
 
@@ -504,6 +553,12 @@ func TestToolRequestRejectsUnsupportedArrayStyle(t *testing.T) {
 func TestParseArgsRejectsRemovedHTTPFlag(t *testing.T) {
 	if _, err := ParseArgs([]string{"serve", "--http", ":3000", "demo"}); err == nil {
 		t.Fatal("expected removed --http flag to be rejected by flag parser")
+	}
+}
+
+func TestParseArgsRejectsOperationInventoryFilter(t *testing.T) {
+	if _, err := ParseArgs([]string{"serve", "--operations", "getItem", "demo"}); err == nil {
+		t.Fatal("expected removed operation inventory filter to be rejected")
 	}
 }
 
