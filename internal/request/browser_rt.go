@@ -32,7 +32,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -54,6 +53,9 @@ type BrowserRoundTripper struct {
 	once     sync.Once
 	port     int
 	cmd      *exec.Cmd
+	done     chan error
+	exitErr  error
+	reaped   bool
 	err      error
 	spawnErr error
 	stderr   *tailBuffer
@@ -96,14 +98,18 @@ func (t *BrowserRoundTripper) RoundTrip(req *http.Request) (*http.Response, erro
 	}
 
 	fwdURL := fmt.Sprintf("http://127.0.0.1:%d/request", t.port)
-	fwdReq, err := http.NewRequest(http.MethodPost, fwdURL, bytes.NewReader(data))
+	// The loopback hop is part of the original request, not an independent
+	// fifteen-minute operation.  Inheriting the caller context makes
+	// --rsh-timeout and MCP request cancellation stop the forwarder request too.
+	fwdReq, err := http.NewRequestWithContext(
+		req.Context(), http.MethodPost, fwdURL, bytes.NewReader(data),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("browser forwarder: %w", err)
 	}
 	fwdReq.Header.Set("Content-Type", "application/json")
 
-	// Long timeout: a cold browser may need to warm the origin first.
-	client := &http.Client{Timeout: 15 * time.Minute}
+	client := &http.Client{}
 	fwdResp, err := client.Do(fwdReq)
 	if err != nil {
 		return nil, fmt.Errorf("browser forwarder: %w", err)
@@ -177,9 +183,21 @@ func (t *BrowserRoundTripper) Close() error {
 		return nil
 	}
 	err := t.cmd.Process.Kill()
-	_ = t.cmd.Wait()
+	t.waitProcess()
 	t.cmd = nil
 	return err
+}
+
+// Probe starts the exact forwarder subprocess used by RoundTrip, waits for
+// /healthz, and immediately reaps it.  It never sends an upstream request.
+// Generated-runtime doctors use this to catch import, bind and lifecycle
+// failures before the first authorized platform call.
+func (t *BrowserRoundTripper) Probe() error {
+	t.once.Do(t.start)
+	if t.err != nil {
+		return t.err
+	}
+	return t.Close()
 }
 
 // CloseIdleConnections is a no-op kept for http.Transport interface parity.
@@ -264,6 +282,12 @@ func (t *BrowserRoundTripper) spawn(port int) error {
 		return err
 	}
 	t.cmd = cmd
+	t.done = make(chan error, 1)
+	t.reaped = false
+	go func() {
+		t.done <- cmd.Wait()
+		close(t.done)
+	}()
 	return nil
 }
 
@@ -386,19 +410,32 @@ func (t *BrowserRoundTripper) waitReady() bool {
 }
 
 func (t *BrowserRoundTripper) processExited() bool {
-	if t.cmd == nil || t.cmd.Process == nil {
+	if t.cmd == nil || t.cmd.Process == nil || t.done == nil {
 		return true
 	}
-	err := t.cmd.Process.Signal(syscall.Signal(0))
-	return err != nil
+	select {
+	case t.exitErr = <-t.done:
+		t.reaped = true
+		return true
+	default:
+		return false
+	}
 }
 
 func (t *BrowserRoundTripper) kill() {
 	if t.cmd != nil && t.cmd.Process != nil {
 		_ = t.cmd.Process.Kill()
-		_ = t.cmd.Wait()
+		t.waitProcess()
 		t.cmd = nil
 	}
+}
+
+func (t *BrowserRoundTripper) waitProcess() {
+	if t.reaped || t.done == nil {
+		return
+	}
+	t.exitErr = <-t.done
+	t.reaped = true
 }
 
 func forwarderError(port int, spawnErr error, stderr string) error {

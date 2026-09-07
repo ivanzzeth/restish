@@ -6,14 +6,77 @@
 package request
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestBrowserRoundTripperHonorsCallerCancellation(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	fwd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-release
+	}))
+	defer func() {
+		close(release)
+		fwd.Close()
+	}()
+
+	port := strings.TrimPrefix(fwd.URL, "http://127.0.0.1:")
+	rt := NewBrowserRoundTripper(BrowserRoundTripperConfig{Target: "mysite"})
+	rt.ready(atoiSafe(port))
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.example.com/x", nil)
+
+	begin := time.Now()
+	_, err := rt.RoundTrip(req)
+	if err == nil {
+		t.Fatal("expected request cancellation")
+	}
+	if elapsed := time.Since(begin); elapsed > time.Second {
+		t.Fatalf("cancellation took %s; loopback request ignored caller context", elapsed)
+	}
+	select {
+	case <-started:
+	default:
+		t.Fatal("fixture forwarder never received request")
+	}
+}
+
+func TestBrowserRoundTripperDetectsExitedForwarderWithoutReadinessTimeout(t *testing.T) {
+	if os.PathSeparator == '\\' {
+		t.Skip("shell fixture is POSIX-only")
+	}
+	dir := t.TempDir()
+	python := filepath.Join(dir, "python")
+	if err := os.WriteFile(python, []byte("#!/bin/sh\necho startup-sentinel >&2\nexit 23\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OPEN_SURFACE_PYTHON", python)
+	rt := NewBrowserRoundTripper(BrowserRoundTripperConfig{Target: "mysite"})
+
+	begin := time.Now()
+	err := rt.Probe()
+	if err == nil {
+		t.Fatal("expected readiness failure")
+	}
+	if elapsed := time.Since(begin); elapsed > 3*time.Second {
+		t.Fatalf("dead forwarder took %s to detect", elapsed)
+	}
+	if !strings.Contains(err.Error(), "startup-sentinel") {
+		t.Fatalf("startup stderr was not preserved: %v", err)
+	}
+}
 
 // ready marks a round tripper as initialized without spawning a subprocess.
 func (t *BrowserRoundTripper) ready(port int) {
