@@ -9,7 +9,12 @@ import (
 )
 
 const (
-	maxCBORNestedLevels  = 16
+	// OpenAPI-derived plugin messages add protocol envelopes around schemas.
+	// Real contracts can therefore exceed the decoder's conservative default
+	// even when the schema itself is reasonable. 64 accommodates deeply nested
+	// schemas while retaining a finite stack/resource bound for untrusted
+	// plugin messages.
+	maxCBORNestedLevels  = 64
 	maxCBORArrayElements = 65536
 	maxCBORMapPairs      = 16384
 )

@@ -223,14 +223,55 @@ func TestLargeMessageRoundTrip(t *testing.T) {
 
 func TestDecModeUsesPluginMessageLimits(t *testing.T) {
 	opts := plugin.DecMode.DecOptions()
-	if opts.MaxNestedLevels != 16 {
-		t.Fatalf("MaxNestedLevels = %d, want 16", opts.MaxNestedLevels)
+	if opts.MaxNestedLevels != 64 {
+		t.Fatalf("MaxNestedLevels = %d, want 64", opts.MaxNestedLevels)
 	}
 	if opts.MaxArrayElements != 65536 {
 		t.Fatalf("MaxArrayElements = %d, want 65536", opts.MaxArrayElements)
 	}
 	if opts.MaxMapPairs != 16384 {
 		t.Fatalf("MaxMapPairs = %d, want 16384", opts.MaxMapPairs)
+	}
+}
+
+func TestAPISpecResponseSupportsLargeDeepContracts(t *testing.T) {
+	// This mirrors the shape and operation count of the xiaohongshu contract
+	// that exposed the old 16-level decoder limit. The protocol envelope and
+	// APIOperation fields add levels around the OpenAPI-derived schema.
+	var schema any = map[string]any{"type": "string"}
+	for i := 0; i < 24; i++ {
+		schema = map[string]any{
+			"type":       "object",
+			"properties": map[string]any{"child": schema},
+		}
+	}
+
+	operations := make([]plugin.APIOperation, 77)
+	for i := range operations {
+		operations[i] = plugin.APIOperation{
+			ID:            "operation-" + strconv.Itoa(i),
+			Method:        "POST",
+			Path:          "/operation/" + strconv.Itoa(i),
+			HasBody:       true,
+			RequestSchema: schema.(map[string]any),
+		}
+	}
+	message := plugin.APISpecResponseMsg{
+		Type:       plugin.MsgTypeAPISpecResponse,
+		Name:       "xiaohongshu",
+		Operations: operations,
+	}
+
+	var buf bytes.Buffer
+	if err := plugin.WriteMessage(&buf, message); err != nil {
+		t.Fatalf("WriteMessage: %v", err)
+	}
+	var got plugin.APISpecResponseMsg
+	if err := plugin.ReadMessage(&buf, &got); err != nil {
+		t.Fatalf("ReadMessage: %v", err)
+	}
+	if len(got.Operations) != 77 {
+		t.Fatalf("operation count = %d, want 77", len(got.Operations))
 	}
 }
 
@@ -273,7 +314,7 @@ func TestReadMessageRejectsOversizedMap(t *testing.T) {
 
 func TestReadMessageRejectsExcessiveNesting(t *testing.T) {
 	var nested any = "leaf"
-	for i := 0; i < 17; i++ {
+	for i := 0; i < 65; i++ {
 		nested = []any{nested}
 	}
 	var buf bytes.Buffer
