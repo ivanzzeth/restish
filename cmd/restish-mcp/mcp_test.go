@@ -717,6 +717,95 @@ func TestRunServeToolCall(t *testing.T) {
 	}
 }
 
+func TestRunServeHonorsWriteExecutionFlagsWithoutHidingTools(t *testing.T) {
+	spec := loadTestSpec(t, "demo", `{
+	  "openapi": "3.1.0",
+	  "info": {"title": "Demo", "version": "1.0.0"},
+	  "paths": {
+	    "/items": {
+	      "post": {"operationId": "createItem"}
+	    }
+	  }
+	}`)
+
+	tests := []struct {
+		name       string
+		args       []string
+		wantCalled bool
+		wantError  string
+	}{
+		{
+			name:      "default refuses write at call time",
+			args:      []string{"serve", "demo"},
+			wantError: "require --allow-write-tools",
+		},
+		{
+			name:       "allow-write-tools permits execution",
+			args:       []string{"serve", "--allow-write-tools", "demo"},
+			wantCalled: true,
+		},
+		{
+			name:      "read-only remains stricter",
+			args:      []string{"serve", "--allow-write-tools", "--read-only", "demo"},
+			wantError: "disabled by --read-only",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var stdin bytes.Buffer
+			writeFrame(&stdin, mustJSON(t, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      1,
+				"method":  "tools/list",
+			}))
+			writeFrame(&stdin, mustJSON(t, map[string]any{
+				"jsonrpc": "2.0",
+				"id":      2,
+				"method":  "tools/call",
+				"params": map[string]any{
+					"name":      "createItem",
+					"arguments": map[string]any{},
+				},
+			}))
+
+			called := false
+			var stdout bytes.Buffer
+			err := Run(
+				&stdin,
+				&stdout,
+				func(string) (*APISpec, error) { return spec, nil },
+				func(*HTTPRequest) (*HTTPResponse, error) {
+					called = true
+					return &HTTPResponse{Status: 200}, nil
+				},
+				tt.args,
+			)
+			if err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if called != tt.wantCalled {
+				t.Fatalf("HTTP executor called = %v, want %v", called, tt.wantCalled)
+			}
+
+			responses := readResponses(t, stdout.Bytes())
+			listed := responses[0]["result"].(map[string]any)["tools"].([]any)
+			if len(listed) != 1 || listed[0].(map[string]any)["name"] != "createItem" {
+				t.Fatalf("write tool disappeared from inventory: %#v", listed)
+			}
+			if tt.wantError == "" {
+				if responses[1]["error"] != nil {
+					t.Fatalf("unexpected call error: %#v", responses[1]["error"])
+				}
+				return
+			}
+			callError := responses[1]["error"].(map[string]any)
+			if !strings.Contains(callError["message"].(string), tt.wantError) {
+				t.Fatalf("call error = %#v, want %q", callError, tt.wantError)
+			}
+		})
+	}
+}
+
 func TestServeStdioInvalidRequests(t *testing.T) {
 	var stdin bytes.Buffer
 	writeFrame(&stdin, mustJSON(t, map[string]any{

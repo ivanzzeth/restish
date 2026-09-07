@@ -19,11 +19,13 @@ func Run(stdin io.Reader, stdout io.Writer, fetchSpec SpecFetcher, exec HTTPExec
 		return err
 	}
 	server := &Server{
-		Tools:          tools,
-		ToolIndex:      indexTools(tools),
-		Exec:           exec,
-		MaxResultBytes: cfg.Options.MaxResultBytes,
-		RequestTimeout: cfg.Options.RequestTimeout,
+		Tools:           tools,
+		ToolIndex:       indexTools(tools),
+		Exec:            exec,
+		MaxResultBytes:  cfg.Options.MaxResultBytes,
+		RequestTimeout:  cfg.Options.RequestTimeout,
+		ReadOnly:        cfg.Options.ReadOnly,
+		AllowWriteTools: cfg.Options.AllowWriteTools,
 	}
 	if server.MaxResultBytes <= 0 {
 		server.MaxResultBytes = DefaultMaxResultBytes
