@@ -346,18 +346,28 @@ func disambiguateToolNames(tools []*Tool) {
 	for _, tool := range tools {
 		counts[tool.Name]++
 	}
-	seen := make(map[string]int, len(tools))
+	used := make(map[string]struct{}, len(tools))
+	for _, tool := range tools {
+		if counts[tool.Name] == 1 {
+			used[tool.Name] = struct{}{}
+		}
+	}
 	for _, tool := range tools {
 		if counts[tool.Name] < 2 {
 			continue
 		}
-		seen[tool.Name]++
+		base := tool.Name
 		digest := sha256.Sum256([]byte(tool.APIName + "\n" + strings.ToUpper(tool.Method) + "\n" + tool.Path))
 		suffix := fmt.Sprintf("%x", digest[:4])
-		if seen[tool.Name] > 1 {
-			suffix += fmt.Sprintf("_%d", seen[tool.Name])
+		candidate := base + "__" + suffix
+		for counter := 2; ; counter++ {
+			if _, exists := used[candidate]; !exists {
+				break
+			}
+			candidate = base + "__" + suffix + fmt.Sprintf("_%d", counter)
 		}
-		tool.Name += "__" + suffix
+		tool.Name = candidate
+		used[candidate] = struct{}{}
 	}
 }
 

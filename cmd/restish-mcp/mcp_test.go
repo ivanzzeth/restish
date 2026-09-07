@@ -3,7 +3,9 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -12,6 +14,27 @@ import (
 	"github.com/pb33f/libopenapi"
 	"github.com/rest-sh/restish/v2/plugin"
 )
+
+func TestDisambiguateToolNamesNeverOverwritesAnExistingDigestShapedName(t *testing.T) {
+	first := &Tool{Name: "same", APIName: "demo", Method: "GET", Path: "/first"}
+	digest := sha256.Sum256([]byte("demo\nGET\n/first"))
+	reserved := "same__" + fmt.Sprintf("%x", digest[:4])
+	tools := []*Tool{
+		first,
+		{Name: "same", APIName: "demo", Method: "GET", Path: "/second"},
+		{Name: reserved, APIName: "demo", Method: "GET", Path: "/third"},
+	}
+
+	disambiguateToolNames(tools)
+	indexed := indexTools(tools)
+
+	if len(indexed) != 3 {
+		t.Fatalf("tool-name collision hid an operation: %#v", tools)
+	}
+	if first.Name == reserved {
+		t.Fatalf("disambiguated name %q collided with an existing tool", first.Name)
+	}
+}
 
 func loadTestSpec(t *testing.T, name, raw string) *APISpec {
 	t.Helper()
