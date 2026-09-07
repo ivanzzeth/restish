@@ -1884,9 +1884,15 @@ func (c *CLI) applyAPIProfile(rawURL, profileName string, opts request.Options, 
 			opts.ClientKeyPath = match.profile.ClientKeyPath
 		}
 		if match.profile.Browser {
+			if match.profile.BrowserTarget == "" {
+				return rawURL, match.apiName, opts, fmt.Errorf(
+					"profile %q enables browser transport without browser_target",
+					profileName,
+				)
+			}
 			opts.Browser = true
 			opts.BrowserPort = match.profile.BrowserPort
-			opts.BrowserTarget = match.apiName
+			opts.BrowserTarget = match.profile.BrowserTarget
 		}
 	}
 	if match.apiName != "" {

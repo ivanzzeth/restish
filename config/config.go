@@ -168,6 +168,10 @@ type ProfileConfig struct {
 	// layers respond to the CLI. Site-agnostic: enabled for any API that needs
 	// it, and harmless for sites without protection.
 	Browser bool `json:"browser,omitempty"`
+	// BrowserTarget names the open-surface surface whose session state is
+	// shared by this API face. It is deliberately separate from the Restish API
+	// registration name, which must be unique per contract face.
+	BrowserTarget string `json:"browser_target,omitempty"`
 	// BrowserPort pins the forwarder port; 0 lets Restish pick a free one.
 	BrowserPort int `json:"browser_port,omitempty"`
 }

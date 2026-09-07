@@ -227,6 +227,68 @@ func TestApplyAPIProfileMergesProfileTLSWithFlagPrecedence(t *testing.T) {
 	}
 }
 
+func TestApplyAPIProfileKeepsPerFaceAPIIdentityAndSharedBrowserTarget(t *testing.T) {
+	c := New()
+	c.cfg = &config.Config{
+		APIs: map[string]*config.APIConfig{
+			"binance--spot": {
+				BaseURL: "https://api.binance.com",
+				Profiles: map[string]*config.ProfileConfig{
+					"default": {Browser: true, BrowserTarget: "binance"},
+				},
+			},
+			"binance--futures": {
+				BaseURL: "https://fapi.binance.com",
+				Profiles: map[string]*config.ProfileConfig{
+					"default": {Browser: true, BrowserTarget: "binance"},
+				},
+			},
+		},
+	}
+
+	for _, apiName := range []string{"binance--spot", "binance--futures"} {
+		_, gotAPI, opts, err := c.applyAPIProfile(
+			apiName+"/api/v3/time",
+			"default",
+			request.Options{},
+			authHandlerOptions{},
+		)
+		if err != nil {
+			t.Fatalf("applyAPIProfile(%q): %v", apiName, err)
+		}
+		if gotAPI != apiName {
+			t.Fatalf("api identity = %q, want %q", gotAPI, apiName)
+		}
+		if !opts.Browser || opts.BrowserTarget != "binance" {
+			t.Fatalf("browser routing for %q = %#v", apiName, opts)
+		}
+	}
+}
+
+func TestApplyAPIProfileRejectsBrowserTransportWithoutSurfaceTarget(t *testing.T) {
+	c := New()
+	c.cfg = &config.Config{
+		APIs: map[string]*config.APIConfig{
+			"binance--spot": {
+				BaseURL: "https://api.binance.com",
+				Profiles: map[string]*config.ProfileConfig{
+					"default": {Browser: true},
+				},
+			},
+		},
+	}
+
+	_, _, _, err := c.applyAPIProfile(
+		"binance--spot/api/v3/time",
+		"default",
+		request.Options{},
+		authHandlerOptions{},
+	)
+	if err == nil || !strings.Contains(err.Error(), "without browser_target") {
+		t.Fatalf("error = %v, want missing browser_target refusal", err)
+	}
+}
+
 func TestApplyAPIProfileTreatsMissingDefaultProfileAsImplicit(t *testing.T) {
 	c := New()
 	c.cfg = &config.Config{

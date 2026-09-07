@@ -59,7 +59,11 @@ func TestBrowserRoundTripperDetectsExitedForwarderWithoutReadinessTimeout(t *tes
 	}
 	dir := t.TempDir()
 	python := filepath.Join(dir, "python")
-	if err := os.WriteFile(python, []byte("#!/bin/sh\necho startup-sentinel >&2\nexit 23\n"), 0o755); err != nil {
+	if err := os.WriteFile(
+		python,
+		[]byte("#!/bin/sh\nprintf '\\033[31mforwarder-stdout\\033[0m\\n'\necho startup-stderr >&2\nexit 23\n"),
+		0o755,
+	); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("OPEN_SURFACE_PYTHON", python)
@@ -73,8 +77,8 @@ func TestBrowserRoundTripperDetectsExitedForwarderWithoutReadinessTimeout(t *tes
 	if elapsed := time.Since(begin); elapsed > 3*time.Second {
 		t.Fatalf("dead forwarder took %s to detect", elapsed)
 	}
-	if !strings.Contains(err.Error(), "startup-sentinel") {
-		t.Fatalf("startup stderr was not preserved: %v", err)
+	if !strings.Contains(err.Error(), "forwarder-stdout") || !strings.Contains(err.Error(), "startup-stderr") {
+		t.Fatalf("startup diagnostics were not isolated and preserved: %v", err)
 	}
 }
 

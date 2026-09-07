@@ -276,8 +276,12 @@ func (t *BrowserRoundTripper) spawn(port int) error {
 		t.stderr = newTailBuffer(4096)
 	}
 	t.stderr.Reset()
-	cmd.Stderr = io.MultiWriter(os.Stderr, t.stderr)
-	cmd.Stdout = os.Stdout
+	diagnostics := io.MultiWriter(os.Stderr, t.stderr)
+	cmd.Stderr = diagnostics
+	// stdout may be an MCP JSON-RPC/stdio transport. The Python forwarder and
+	// browser runtime are allowed to emit startup diagnostics (including ANSI),
+	// but those bytes must never corrupt the protocol stream.
+	cmd.Stdout = diagnostics
 	if err := cmd.Start(); err != nil {
 		return err
 	}
