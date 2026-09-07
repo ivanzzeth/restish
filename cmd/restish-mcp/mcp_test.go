@@ -693,6 +693,49 @@ func TestServeStdioInvalidRequests(t *testing.T) {
 	}
 }
 
+func TestServeStdioSupportsJSONLinesInitializeAndCompleteToolList(t *testing.T) {
+	server := &Server{
+		Tools: []*Tool{
+			{Name: "first", Description: "first tool", InputSchema: map[string]any{"type": "object"}},
+			{Name: "second", Description: "second tool", InputSchema: map[string]any{"type": "object"}},
+		},
+	}
+	requests := []map[string]any{
+		{"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": map[string]any{}},
+		{"jsonrpc": "2.0", "method": "notifications/initialized"},
+		{"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": map[string]any{}},
+	}
+	var stdin bytes.Buffer
+	for _, request := range requests {
+		stdin.Write(mustJSON(t, request))
+		stdin.WriteByte('\n')
+	}
+	var stdout bytes.Buffer
+	if err := server.ServeStdio(&stdin, &stdout); err != nil {
+		t.Fatalf("ServeStdio: %v", err)
+	}
+
+	lines := bytes.Split(bytes.TrimSpace(stdout.Bytes()), []byte{'\n'})
+	if len(lines) != 2 {
+		t.Fatalf("responses = %d, want initialize and tools/list: %q", len(lines), stdout.Bytes())
+	}
+	var initialized map[string]any
+	if err := json.Unmarshal(lines[0], &initialized); err != nil {
+		t.Fatalf("initialize response is not one JSON line: %v", err)
+	}
+	if initialized["id"] != float64(1) {
+		t.Fatalf("initialize id = %#v, want 1", initialized["id"])
+	}
+	var listed map[string]any
+	if err := json.Unmarshal(lines[1], &listed); err != nil {
+		t.Fatalf("tools/list response is not one JSON line: %v", err)
+	}
+	tools := listed["result"].(map[string]any)["tools"].([]any)
+	if len(tools) != 2 {
+		t.Fatalf("tools = %#v, want complete dynamic list", tools)
+	}
+}
+
 func TestReadFrameHeaderLimits(t *testing.T) {
 	t.Run("oversized line", func(t *testing.T) {
 		input := strings.Repeat("X", maxRPCHeaderLineBytes+1) + "\r\n\r\n"

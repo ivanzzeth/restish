@@ -46,15 +46,22 @@ type rpcError struct {
 	Message string `json:"message"`
 }
 
+type rpcFraming uint8
+
+const (
+	contentLengthFraming rpcFraming = iota
+	jsonLineFraming
+)
+
 func (s *Server) ServeStdio(stdin io.Reader, stdout io.Writer) error {
 	reader := bufio.NewReader(stdin)
 	for {
-		payload, err := readFrame(reader)
+		payload, framing, err := readMCPFrame(reader)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				return nil
 			}
-			_ = writeRPC(stdout, rpcResponse{
+			_ = writeRPC(stdout, framing, rpcResponse{
 				JSONRPC: "2.0",
 				ID:      nil,
 				Error:   &rpcError{Code: -32700, Message: "framing error: " + err.Error()},
@@ -63,7 +70,7 @@ func (s *Server) ServeStdio(stdin io.Reader, stdout io.Writer) error {
 		}
 		req, err := parseRPCRequest(payload)
 		if err != nil {
-			if writeErr := writeRPC(stdout, rpcResponse{
+			if writeErr := writeRPC(stdout, framing, rpcResponse{
 				JSONRPC: "2.0",
 				ID:      nil,
 				Error:   &rpcError{Code: -32700, Message: "parse error"},
@@ -73,7 +80,7 @@ func (s *Server) ServeStdio(stdin io.Reader, stdout io.Writer) error {
 			continue
 		}
 		if err := validateRPCRequest(req); err != nil {
-			if writeErr := writeRPC(stdout, rpcResponse{
+			if writeErr := writeRPC(stdout, framing, rpcResponse{
 				JSONRPC: "2.0",
 				ID:      responseID(req),
 				Error:   &rpcError{Code: -32600, Message: "invalid request"},
@@ -86,7 +93,7 @@ func (s *Server) ServeStdio(stdin io.Reader, stdout io.Writer) error {
 		if !req.HasID || resp.JSONRPC == "" {
 			continue
 		}
-		if err := writeRPC(stdout, resp); err != nil {
+		if err := writeRPC(stdout, framing, resp); err != nil {
 			return err
 		}
 	}
@@ -270,6 +277,54 @@ func marshalPretty(v any) string {
 }
 
 func readFrame(r *bufio.Reader) ([]byte, error) {
+	payload, _, err := readMCPFrame(r)
+	return payload, err
+}
+
+func readMCPFrame(r *bufio.Reader) ([]byte, rpcFraming, error) {
+	first, err := r.Peek(1)
+	if err != nil {
+		return nil, contentLengthFraming, err
+	}
+	if first[0] == '{' {
+		payload, err := readJSONLine(r)
+		return payload, jsonLineFraming, err
+	}
+	payload, err := readContentLengthFrame(r)
+	return payload, contentLengthFraming, err
+}
+
+func readJSONLine(r *bufio.Reader) ([]byte, error) {
+	payload := make([]byte, 0, 4096)
+	for {
+		fragment, err := r.ReadSlice('\n')
+		payload = append(payload, fragment...)
+		if len(payload) > maxRPCPayloadBytes+2 {
+			return nil, fmt.Errorf("MCP JSON line exceeds %d bytes", maxRPCPayloadBytes)
+		}
+		if err == nil {
+			break
+		}
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		if errors.Is(err, io.EOF) && len(payload) > 0 {
+			break
+		}
+		return nil, err
+	}
+	payload = bytes.TrimSuffix(payload, []byte{'\n'})
+	payload = bytes.TrimSuffix(payload, []byte{'\r'})
+	if len(payload) == 0 {
+		return nil, errors.New("empty MCP JSON line")
+	}
+	if len(payload) > maxRPCPayloadBytes {
+		return nil, fmt.Errorf("MCP JSON line exceeds %d bytes", maxRPCPayloadBytes)
+	}
+	return payload, nil
+}
+
+func readContentLengthFrame(r *bufio.Reader) ([]byte, error) {
 	length := -1
 	totalHeaderBytes := 0
 	for {
@@ -328,9 +383,14 @@ func readHeaderLine(r *bufio.Reader) (string, int, error) {
 	}
 }
 
-func writeRPC(w io.Writer, resp rpcResponse) error {
+func writeRPC(w io.Writer, framing rpcFraming, resp rpcResponse) error {
 	data, err := json.Marshal(resp)
 	if err != nil {
+		return err
+	}
+	if framing == jsonLineFraming {
+		data = append(data, '\n')
+		_, err = w.Write(data)
 		return err
 	}
 	return writeFrame(w, data)

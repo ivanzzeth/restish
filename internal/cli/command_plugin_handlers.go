@@ -102,7 +102,12 @@ func (c *CLI) handleCommandPluginMessage(cmd *cobra.Command, requestCtx context.
 			return false, fmt.Errorf("command plugin: stdout data exceeded %d bytes", maxCommandPluginDataBytes)
 		}
 		if len(msg.Data) > 0 {
-			_, _ = c.Stdout.Write(msg.Data)
+			if _, err := c.Stdout.Write(msg.Data); err != nil {
+				return false, fmt.Errorf("command plugin: write stdout data: %w", err)
+			}
+			if err := c.flushStdout(); err != nil {
+				return false, fmt.Errorf("command plugin: flush stdout data: %w", err)
+			}
 		}
 	case pluginwire.MsgTypeStderrData:
 		var msg pluginwire.StderrDataMsg

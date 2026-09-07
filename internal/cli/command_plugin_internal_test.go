@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -75,6 +77,35 @@ func TestHandleCommandPluginMessageRejectsOversizedStdoutData(t *testing.T) {
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("oversized stdout data was written: %d bytes", stdout.Len())
+	}
+}
+
+func TestHandleCommandPluginMessageFlushesStdoutData(t *testing.T) {
+	var downstream bytes.Buffer
+	stdout := &cascadingFlushWriter{
+		Writer:     bufio.NewWriterSize(&downstream, 1024),
+		downstream: &downstream,
+	}
+	cli := &CLI{Stdout: stdout, Stderr: io.Discard}
+	cmd := &cobra.Command{Use: "test"}
+
+	raw, err := cbor.Marshal(pluginwire.StdoutDataMsg{
+		Type: pluginwire.MsgTypeStdoutData,
+		Data: []byte("initialize-response\n"),
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	done, err := cli.handleCommandPluginMessage(cmd, context.Background(), nil, nil, pluginwire.MsgTypeStdoutData, raw)
+	if err != nil {
+		t.Fatalf("handle stdout-data: %v", err)
+	}
+	if done {
+		t.Fatal("stdout-data should not mark command plugin done")
+	}
+	if got := downstream.String(); got != "initialize-response\n" {
+		t.Fatalf("downstream stdout = %q before command exit", got)
 	}
 }
 
