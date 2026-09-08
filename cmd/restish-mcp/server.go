@@ -165,6 +165,15 @@ func (s *Server) handleRequest(req rpcRequest) rpcResponse {
 				"description": tool.Description,
 				"inputSchema": tool.InputSchema,
 				"annotations": toolAnnotations(tool.Method),
+				"_meta": map[string]any{
+					"open_surface": map[string]any{
+						"http_operation": map[string]any{
+							"method":       strings.ToUpper(tool.Method),
+							"path":         tool.Path,
+							"operation_id": tool.OperationID,
+						},
+					},
+				},
 			})
 		}
 		resp.Result = map[string]any{"tools": tools}

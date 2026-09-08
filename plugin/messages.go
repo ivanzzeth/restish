@@ -109,6 +109,7 @@ type APISpecResponseMsg struct {
 // plugins do not need to re-parse raw OpenAPI specs.
 type APIOperation struct {
 	ID                   string         `cbor:"id"`
+	SourceID             string         `cbor:"source_id"`
 	Method               string         `cbor:"method"`
 	Path                 string         `cbor:"path"`
 	Summary              string         `cbor:"summary,omitempty"`

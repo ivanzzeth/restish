@@ -29,6 +29,7 @@ type SpecFetcher func(name string) (*APISpec, error)
 type Tool struct {
 	APIName           string
 	Name              string
+	OperationID       string
 	Description       string
 	Method            string
 	Path              string
@@ -183,6 +184,7 @@ func buildToolFromOperation(apiName string, multiAPI bool, op plugin.APIOperatio
 	return &Tool{
 		APIName:           apiName,
 		Name:              name,
+		OperationID:       op.SourceID,
 		Description:       description,
 		Method:            op.Method,
 		Path:              op.Path,
@@ -303,6 +305,7 @@ func buildTool(apiName string, multiAPI bool, path, method string, pathParams []
 	return &Tool{
 		APIName:         apiName,
 		Name:            name,
+		OperationID:     op.OperationId,
 		Description:     description,
 		Method:          method,
 		Path:            path,

@@ -443,6 +443,23 @@ func TestPluginOperationsFromSpecUsesFallbackOperationName(t *testing.T) {
 	}
 }
 
+func TestPluginOperationsFromSpecKeepsSourceOperationIdentity(t *testing.T) {
+	ops := pluginOperationsFromSpec([]spec.Operation{{
+		ID:     "listItems",
+		Method: "GET",
+		Path:   "/items",
+	}}, "")
+	if len(ops) != 1 {
+		t.Fatalf("len(ops) = %d, want 1", len(ops))
+	}
+	if got, want := ops[0].ID, "list-items"; got != want {
+		t.Fatalf("runtime operation ID = %q, want %q", got, want)
+	}
+	if got, want := ops[0].SourceID, "listItems"; got != want {
+		t.Fatalf("source operation ID = %q, want %q", got, want)
+	}
+}
+
 func TestPluginOperationsFromSpecUsesOperationBaseFallbackName(t *testing.T) {
 	ops := pluginOperationsFromSpec([]spec.Operation{{
 		Method: "GET",

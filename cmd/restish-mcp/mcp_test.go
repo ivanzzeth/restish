@@ -863,7 +863,10 @@ func TestServeStdioInvalidRequests(t *testing.T) {
 func TestServeStdioSupportsJSONLinesInitializeAndCompleteToolList(t *testing.T) {
 	server := &Server{
 		Tools: []*Tool{
-			{Name: "first", Description: "first tool", InputSchema: map[string]any{"type": "object"}},
+			{
+				Name: "first", OperationID: "listItems", Description: "first tool",
+				Method: "GET", Path: "/items", InputSchema: map[string]any{"type": "object"},
+			},
 			{Name: "second", Description: "second tool", InputSchema: map[string]any{"type": "object"}},
 		},
 	}
@@ -900,6 +903,17 @@ func TestServeStdioSupportsJSONLinesInitializeAndCompleteToolList(t *testing.T) 
 	tools := listed["result"].(map[string]any)["tools"].([]any)
 	if len(tools) != 2 {
 		t.Fatalf("tools = %#v, want complete dynamic list", tools)
+	}
+	first := tools[0].(map[string]any)
+	httpOperation := first["_meta"].(map[string]any)["open_surface"].(map[string]any)["http_operation"].(map[string]any)
+	if got, want := httpOperation["method"], "GET"; got != want {
+		t.Fatalf("method = %#v, want %#v", got, want)
+	}
+	if got, want := httpOperation["path"], "/items"; got != want {
+		t.Fatalf("path = %#v, want %#v", got, want)
+	}
+	if got, want := httpOperation["operation_id"], "listItems"; got != want {
+		t.Fatalf("operation_id = %#v, want %#v", got, want)
 	}
 }
 

@@ -383,6 +383,7 @@ func pluginOperationsFromSpec(ops []spec.Operation, operationBase string) []plug
 		requestSchema, requestSchemaDialect := operationRequestSchema(op)
 		out = append(out, pluginwire.APIOperation{
 			ID:                   operationCommandName(op, operationBase),
+			SourceID:             op.ID,
 			Method:               op.Method,
 			Path:                 op.Path,
 			Summary:              op.Summary,
