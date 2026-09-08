@@ -435,6 +435,63 @@ paths:
 	}})
 }
 
+func TestOperationsWithoutDocumentSecurityKeepUnsecuredSiblingsAnonymous(t *testing.T) {
+	raw := `openapi: "3.1.0"
+info:
+  title: Mixed Auth
+  version: "1.0.0"
+components:
+  securitySchemes:
+    HeaderKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+paths:
+  /public:
+    get:
+      operationId: listPublic
+      responses:
+        "200": {description: OK}
+  /private:
+    get:
+      operationId: listPrivate
+      security:
+        - HeaderKey: []
+      responses:
+        "200": {description: OK}
+  /explicit-public:
+    get:
+      operationId: listExplicitPublic
+      security: []
+      responses:
+        "200": {description: OK}`
+	loaded, err := load("application/yaml", []byte(raw), DefaultLoaders())
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	ops, err := loaded.Operations(OperationOptions{BaseURL: "https://api.example.com"})
+	if err != nil {
+		t.Fatalf("operations: %v", err)
+	}
+
+	for _, id := range []string{"listPublic", "listExplicitPublic"} {
+		op := operationByID(t, ops, id)
+		if !op.NoAuth {
+			t.Fatalf("%s NoAuth = false, want true", id)
+		}
+		if len(op.CredentialAlternatives) != 0 {
+			t.Fatalf("%s alternatives = %#v, want none", id, op.CredentialAlternatives)
+		}
+	}
+	private := operationByID(t, ops, "listPrivate")
+	if private.NoAuth {
+		t.Fatal("listPrivate NoAuth = true, want false")
+	}
+	requireCredential(t, private, [][]CredentialRequirement{{{
+		ID: "HeaderKey", Ref: "#/components/securitySchemes/HeaderKey", Kind: "api-key", In: "header", Name: "X-API-Key", Source: "openapi",
+	}}})
+}
+
 func TestOperationsMarksUndeclaredCredentialRequirement(t *testing.T) {
 	raw := `openapi: "3.1.0"
 info:

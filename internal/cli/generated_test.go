@@ -4088,7 +4088,7 @@ func TestGeneratedCommandIgnoresReservedHeaderParameters(t *testing.T) {
 			openAPIParam("Authorization", "header", true, `{"type":"string"}`),
 			openAPIParam("Accept", "header", false, `{"type":"string"}`),
 			openAPIParam("Content-Type", "header", false, `{"type":"string"}`),
-		))
+		), openAPISecurity(`{}`))
 	})
 	cfg, err := config.Load(env.cfgFile)
 	if err != nil {
@@ -4392,6 +4392,7 @@ func TestGeneratedCommandRequiredCookieIsRequiredArgument(t *testing.T) {
 	env := setupEnvWithSpec(t, mux, func(baseURL string) string {
 		return openAPIGetOperationSpec(baseURL, "Test API", "/session", "getSession",
 			openAPIParams(openAPIParam("session", "cookie", true, `{"type":"string"}`)),
+			openAPISecurity(`{}`),
 		)
 	})
 

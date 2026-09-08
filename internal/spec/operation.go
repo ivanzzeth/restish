@@ -308,16 +308,19 @@ func extractOperation(method, path string, pathParams []*v3.Parameter, op *v3.Op
 		effectiveSecurity = op.Security
 	}
 	o := Operation{
-		ID:                 op.OperationId,
-		Method:             method,
-		Path:               path,
-		Summary:            op.Summary,
-		Description:        op.Description,
-		Deprecated:         op.Deprecated != nil && *op.Deprecated,
-		Tags:               op.Tags,
-		HasBody:            op.RequestBody != nil,
-		BodyRequired:       op.RequestBody != nil && op.RequestBody.Required != nil && *op.RequestBody.Required,
-		NoAuth:             effectiveSecurity != nil && len(effectiveSecurity) == 0,
+		ID:           op.OperationId,
+		Method:       method,
+		Path:         path,
+		Summary:      op.Summary,
+		Description:  op.Description,
+		Deprecated:   op.Deprecated != nil && *op.Deprecated,
+		Tags:         op.Tags,
+		HasBody:      op.RequestBody != nil,
+		BodyRequired: op.RequestBody != nil && op.RequestBody.Required != nil && *op.RequestBody.Required,
+		// OpenAPI operations are anonymous when neither the document nor the
+		// operation declares security. An explicit operation security value still
+		// replaces the document value, including security: [].
+		NoAuth:             len(effectiveSecurity) == 0,
 		MCPIgnore:          OpExtBool(op, "x-mcp-ignore"),
 		RequestMediaType:   preferredRequestMediaType(op),
 		ResponseMediaType:  preferredOperationResponseMediaType(op),
