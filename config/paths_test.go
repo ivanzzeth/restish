@@ -57,6 +57,27 @@ func TestPaths_ExplicitConfigFileUsesRSHCacheDirOverride(t *testing.T) {
 	}
 }
 
+func TestPaths_ExplicitConfigFileUsesRSHStateDirForMutableSidecars(t *testing.T) {
+	t.Setenv("RSH_CACHE_DIR", "/tmp/restish-cache")
+	t.Setenv("RSH_STATE_DIR", "/tmp/restish-state")
+	p := NewPathsWithConfigFile("/tmp/read-only/restish.json")
+	if got, want := p.State(), "/tmp/restish-state"; got != want {
+		t.Fatalf("State() = %q, want %q", got, want)
+	}
+	if got, want := p.TokenCache(), "/tmp/restish-state/tokens.cbor"; got != want {
+		t.Fatalf("TokenCache() = %q, want %q", got, want)
+	}
+	if got, want := p.PluginManifestCache(), "/tmp/restish-state/plugin-manifest-cache.cbor"; got != want {
+		t.Fatalf("PluginManifestCache() = %q, want %q", got, want)
+	}
+	if got, want := p.Cache(), "/tmp/restish-cache"; got != want {
+		t.Fatalf("Cache() = %q, want %q", got, want)
+	}
+	if got, want := p.ConfigFile(), "/tmp/read-only/restish.json"; got != want {
+		t.Fatalf("ConfigFile() = %q, want %q", got, want)
+	}
+}
+
 func TestPaths_ExplicitConfigFileCanonicalizesPath(t *testing.T) {
 	t.Setenv("RSH_CACHE_DIR", "")
 	dir := t.TempDir()

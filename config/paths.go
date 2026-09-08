@@ -30,6 +30,10 @@ type Paths struct {
 	// 3. ~/.cache/restish on Unix-like systems, os.UserCacheDir()/restish on Windows
 	cacheDir string
 	cacheErr error
+	// StateDir stores mutable sidecars which normally follow the selected
+	// config trust root. RSH_STATE_DIR lets embedders keep an explicit config
+	// read-only while persisting tokens, approvals, and plugin metadata.
+	stateDir string
 	// ConfigFile is the explicit config file path when RSH_CONFIG or
 	// --rsh-config selects a file instead of the platform default directory.
 	configFile string
@@ -48,6 +52,7 @@ func NewPaths() *Paths {
 		configErr: configErr,
 		cacheDir:  cacheDir,
 		cacheErr:  cacheErr,
+		stateDir:  computeStateDir(configDir),
 	}
 }
 
@@ -62,6 +67,7 @@ func NewPathsWithConfigFile(path string) *Paths {
 		configFile: path,
 		cacheDir:   cacheDir,
 		cacheErr:   cacheErr,
+		stateDir:   computeStateDir(filepath.Dir(path)),
 	}
 }
 
@@ -98,6 +104,11 @@ func (p *Paths) Cache() string {
 	return p.cacheDir
 }
 
+// State returns the directory for mutable config sidecars.
+func (p *Paths) State() string {
+	return p.stateDir
+}
+
 // CacheError returns why the cache directory used a fallback, if any.
 func (p *Paths) CacheError() error {
 	if p == nil {
@@ -113,12 +124,12 @@ func (p *Paths) SpecCache() string {
 
 // TokenCache returns the path to the token cache file.
 func (p *Paths) TokenCache() string {
-	return filepath.Join(p.configDir, "tokens.cbor")
+	return filepath.Join(p.stateDir, "tokens.cbor")
 }
 
 // PluginManifestCache returns the directory for cached plugin manifests.
 func (p *Paths) PluginManifestCache() string {
-	return filepath.Join(p.configDir, "plugin-manifest-cache.cbor")
+	return filepath.Join(p.stateDir, "plugin-manifest-cache.cbor")
 }
 
 // ConfigFile returns the path to the main restish.json config file.
@@ -166,6 +177,13 @@ func computeCacheDir() (string, error) {
 	}
 	fallback := filepath.Join(os.TempDir(), "restish")
 	return fallback, fmt.Errorf("config: cannot determine cache directory; using %s; set RSH_CACHE_DIR, XDG_CACHE_HOME, or HOME for persistent cache state", fallback)
+}
+
+func computeStateDir(configDir string) string {
+	if dir := os.Getenv("RSH_STATE_DIR"); dir != "" {
+		return dir
+	}
+	return configDir
 }
 
 func computeExplicitConfigCacheDir(configFile string) (string, error) {

@@ -814,6 +814,7 @@ var envDocs = []envDoc{
 	{Name: "RSH_CONFIG", Group: "Config And Profiles", Description: "Explicit config file path. It selects one config file for the invocation.", Source: "config paths"},
 	{Name: "RSH_CONFIG_DIR", Group: "Config And Profiles", Description: "Config directory override; Restish uses `restish.json` inside this directory.", Source: "config paths"},
 	{Name: "RSH_CACHE_DIR", Group: "Config And Profiles", Description: "HTTP/spec cache directory override.", Source: "config paths"},
+	{Name: "RSH_STATE_DIR", Group: "Config And Profiles", Description: "Mutable token, approval, and plugin-manifest sidecar directory override.", Source: "config paths"},
 	{Name: "XDG_CONFIG_HOME", Group: "Config And Profiles", Description: "Base config directory; Restish uses `$XDG_CONFIG_HOME/restish/restish.json`.", Source: "config paths"},
 	{Name: "XDG_CACHE_HOME", Group: "Config And Profiles", Description: "Base cache directory; Restish uses `$XDG_CACHE_HOME/restish`.", Source: "config paths"},
 	{Name: "RSH_PROFILE", Group: "Config And Profiles", Description: "Default API profile name. The `--rsh-profile` flag wins for one command.", Source: "global flags"},

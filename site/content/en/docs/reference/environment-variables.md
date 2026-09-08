@@ -18,6 +18,7 @@ Generated from production source environment-variable usage plus Go's standard p
 | `RSH_CONFIG` | Explicit config file path. It selects one config file for the invocation. | config paths |
 | `RSH_CONFIG_DIR` | Config directory override; Restish uses `restish.json` inside this directory. | config paths |
 | `RSH_CACHE_DIR` | HTTP/spec cache directory override. | config paths |
+| `RSH_STATE_DIR` | Mutable token, approval, and plugin-manifest sidecar directory override. | config paths |
 | `XDG_CONFIG_HOME` | Base config directory; Restish uses `$XDG_CONFIG_HOME/restish/restish.json`. | config paths |
 | `XDG_CACHE_HOME` | Base cache directory; Restish uses `$XDG_CACHE_HOME/restish`. | config paths |
 | `RSH_PROFILE` | Default API profile name. The `--rsh-profile` flag wins for one command. | global flags |

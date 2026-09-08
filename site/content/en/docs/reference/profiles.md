@@ -74,6 +74,7 @@ ProfileConfig holds per-profile overrides for an API.
 | `auth_ref` | `AuthRef` | `string` | no | AuthRef names a top-level auth_profiles entry to use for this profile. |
 | `credentials` | `Credentials` | `map[string]*CredentialConfig` | no | Credentials maps operation credential requirement IDs to auth configurations that satisfy them. |
 | `browser` | `Browser` | `bool` | no | Browser, when true, routes requests through a local browser-backed forwarder (open-surface debug forward) instead of a bare HTTP client. The browser issues the request from a real page context, carrying its TLS fingerprint, cookies, and login state, so sites protected by anti-bot layers respond to the CLI. Site-agnostic: enabled for any API that needs it, and harmless for sites without protection. |
+| `browser_target` | `BrowserTarget` | `string` | no | BrowserTarget names the open-surface surface whose session state is shared by this API face. It is deliberately separate from the Restish API registration name, which must be unique per contract face. |
 | `browser_port` | `BrowserPort` | `int` | no | BrowserPort pins the forwarder port; 0 lets Restish pick a free one. |
 
 ### `CredentialConfig`

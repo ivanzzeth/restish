@@ -35,6 +35,25 @@ func TestExplicitConfigSidecarAndCachePaths(t *testing.T) {
 	}
 }
 
+func TestExplicitConfigMutableSidecarsHonorStateOverride(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config", "restish.json")
+	statePath := filepath.Join(t.TempDir(), "state")
+	t.Setenv("RSH_STATE_DIR", statePath)
+	c := &CLI{
+		Paths:              config.NewPathsWithConfigFile(cfgPath),
+		explicitConfigFile: true,
+	}
+	if got, want := c.tokenCachePath(), filepath.Join(statePath, "tokens.cbor"); got != want {
+		t.Fatalf("tokenCachePath() = %q, want %q", got, want)
+	}
+	if got, want := c.pluginManifestCachePath(), filepath.Join(statePath, "plugin-manifest-cache.cbor"); got != want {
+		t.Fatalf("pluginManifestCachePath() = %q, want %q", got, want)
+	}
+	if got, want := c.externalToolApprovalsPath(), filepath.Join(statePath, "external-tool-approvals.json"); got != want {
+		t.Fatalf("externalToolApprovalsPath() = %q, want %q", got, want)
+	}
+}
+
 func TestSaveExternalToolApprovalsConcurrentLeavesValidFile(t *testing.T) {
 	cfgPath := filepath.Join(t.TempDir(), "restish.json")
 	c := &CLI{hooks: testHooks{ConfigPath: cfgPath}}

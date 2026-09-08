@@ -123,6 +123,16 @@ Cache directory selection mirrors config selection with `RSH_CACHE_DIR`,
 `XDG_CACHE_HOME/restish`, `~/.cache/restish` on Unix-like systems, and the
 Windows user cache directory on Windows.
 
+An embedder may select an immutable explicit config while keeping all Restish
+writes elsewhere by setting `RSH_STATE_DIR`. This override owns mutable
+sidecars: OAuth tokens, external-tool approval records, and the plugin manifest
+cache. It does not move the selected config or its plugin executable trust root,
+and it does not replace `RSH_CACHE_DIR`, which continues to own response and
+spec caches. Without the override, the ordinary sidecar locations above remain
+unchanged. This separation lets a sealed application bundle publish config and
+plugins as read-only content without either mutating that bundle or losing
+persistent runtime state.
+
 If Restish cannot determine a config directory from an explicit config file,
 `RSH_CONFIG_DIR`, `XDG_CONFIG_HOME`, the platform user-config directory, or
 `HOME`, it must fail with a clear setup error instead of falling back to a

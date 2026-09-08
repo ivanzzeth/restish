@@ -47,7 +47,13 @@ func externalToolCommandHash(commandLine string) string {
 }
 
 func (c *CLI) externalToolApprovalsPath() string {
-	return filepath.Join(filepath.Dir(c.configFilePath()), "external-tool-approvals.json")
+	stateDir := os.Getenv("RSH_STATE_DIR")
+	if stateDir == "" {
+		// Keep injected ConfigPath hooks and ordinary explicit configs on the
+		// established sidecar path when no isolation override was requested.
+		stateDir = filepath.Dir(c.configFilePath())
+	}
+	return filepath.Join(stateDir, "external-tool-approvals.json")
 }
 
 func (c *CLI) loadExternalToolApprovals(hash string) (map[string]bool, bool, error) {
