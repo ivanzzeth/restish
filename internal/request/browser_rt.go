@@ -448,6 +448,15 @@ func forwarderError(port int, spawnErr error, stderr string) error {
 	if spawnErr != nil {
 		return fmt.Errorf("browser forwarder could not start: %w", spawnErr)
 	}
+	if forwarderBindPermissionFailure(stderr) {
+		err := fmt.Errorf(
+			"browser forwarder on 127.0.0.1:%d could not bind its loopback socket: "+
+				"permission or sandbox policy denied the operation: %w",
+			port,
+			os.ErrPermission,
+		)
+		return fmt.Errorf("%w\nforwarder output:\n%s", err, stderr)
+	}
 	err := fmt.Errorf(
 		"browser forwarder on 127.0.0.1:%d did not become ready; "+
 			"install the browser transport deps and retry: "+
@@ -458,6 +467,21 @@ func forwarderError(port int, spawnErr error, stderr string) error {
 		return err
 	}
 	return fmt.Errorf("%w\nforwarder output:\n%s", err, stderr)
+}
+
+func forwarderBindPermissionFailure(stderr string) bool {
+	text := strings.ToLower(stderr)
+	bindFrame := strings.Contains(text, "socket.bind") ||
+		strings.Contains(text, "server_bind") ||
+		strings.Contains(text, " bind(") ||
+		strings.Contains(text, "bind:") ||
+		strings.Contains(text, "bind tcp")
+	permission := strings.Contains(text, "permissionerror") ||
+		strings.Contains(text, "permission denied") ||
+		strings.Contains(text, "operation not permitted") ||
+		strings.Contains(text, "eacces") ||
+		strings.Contains(text, "eperm")
+	return bindFrame && permission
 }
 
 func randomPort() int {

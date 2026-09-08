@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +19,54 @@ import (
 	"testing"
 	"time"
 )
+
+func TestForwarderErrorPreservesLoopbackBindPermissionClassification(t *testing.T) {
+	tests := []struct {
+		name   string
+		stderr string
+	}{
+		{
+			name: "python permission error eperm",
+			stderr: "Traceback (most recent call last):\n" +
+				"  File \"socketserver.py\", line 472, in server_bind\n" +
+				"    self.socket.bind(self.server_address)\n" +
+				"PermissionError: [Errno 1] Operation not permitted\n",
+		},
+		{
+			name: "python os error eacces",
+			stderr: "  File \"socketserver.py\", line 472, in server_bind\n" +
+				"OSError: [Errno 13] Permission denied\n",
+		},
+		{
+			name:   "symbolic errno",
+			stderr: "bind: EPERM\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := forwarderError(43123, nil, tt.stderr)
+			if !errors.Is(err, os.ErrPermission) {
+				t.Fatalf("bind denial lost permission classification: %v", err)
+			}
+			if !strings.Contains(err.Error(), tt.stderr) {
+				t.Fatalf("bind denial lost original forwarder output: %v", err)
+			}
+			if strings.Contains(err.Error(), "playwright install chromium") {
+				t.Fatalf("bind denial was misdiagnosed as missing browser runtime: %v", err)
+			}
+		})
+	}
+}
+
+func TestForwarderErrorKeepsBrowserDependencyHintForUnclassifiedStartupFailure(t *testing.T) {
+	err := forwarderError(43123, nil, "ModuleNotFoundError: No module named 'playwright'\n")
+	if errors.Is(err, os.ErrPermission) {
+		t.Fatalf("missing dependency was misclassified as permission denial: %v", err)
+	}
+	if !strings.Contains(err.Error(), "playwright install chromium") {
+		t.Fatalf("missing dependency lost its setup hint: %v", err)
+	}
+}
 
 func TestBrowserRoundTripperHonorsCallerCancellation(t *testing.T) {
 	started := make(chan struct{})
