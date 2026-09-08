@@ -19,6 +19,7 @@ package request
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -33,6 +34,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/rest-sh/restish/v2/internal/procutil"
 )
 
 // BrowserRoundTripperConfig controls the browser-backed transport.
@@ -53,6 +56,7 @@ type BrowserRoundTripper struct {
 	once     sync.Once
 	port     int
 	cmd      *exec.Cmd
+	cancel   context.CancelFunc
 	done     chan error
 	exitErr  error
 	reaped   bool
@@ -182,9 +186,15 @@ func (t *BrowserRoundTripper) Close() error {
 	if t.cmd == nil || t.cmd.Process == nil {
 		return nil
 	}
-	err := t.cmd.Process.Kill()
+	var err error
+	if t.cancel != nil {
+		t.cancel()
+	} else {
+		err = t.cmd.Process.Kill()
+	}
 	t.waitProcess()
 	t.cmd = nil
+	t.cancel = nil
 	return err
 }
 
@@ -268,7 +278,9 @@ func (t *BrowserRoundTripper) spawn(port int) error {
 		"--target", t.cfg.Target,
 		"--port", strconv.Itoa(port),
 	}
-	cmd := exec.Command(pythonBin, args...)
+	processContext, cancel := context.WithCancel(context.Background())
+	cmd := exec.CommandContext(processContext, pythonBin, args...)
+	procutil.ConfigureCommandTreeKill(processContext, cmd)
 	// Tee the forwarder's stderr: it still streams to the user, and the tail is
 	// retained so a failed startup reports the real cause (a traceback, a
 	// missing browser) instead of a generic "did not become ready".
@@ -283,14 +295,17 @@ func (t *BrowserRoundTripper) spawn(port int) error {
 	// but those bytes must never corrupt the protocol stream.
 	cmd.Stdout = diagnostics
 	if err := cmd.Start(); err != nil {
+		cancel()
 		return err
 	}
 	t.cmd = cmd
-	t.done = make(chan error, 1)
+	t.cancel = cancel
+	done := make(chan error, 1)
+	t.done = done
 	t.reaped = false
 	go func() {
-		t.done <- cmd.Wait()
-		close(t.done)
+		done <- cmd.Wait()
+		close(done)
 	}()
 	return nil
 }
@@ -428,9 +443,14 @@ func (t *BrowserRoundTripper) processExited() bool {
 
 func (t *BrowserRoundTripper) kill() {
 	if t.cmd != nil && t.cmd.Process != nil {
-		_ = t.cmd.Process.Kill()
+		if t.cancel != nil {
+			t.cancel()
+		} else {
+			_ = t.cmd.Process.Kill()
+		}
 		t.waitProcess()
 		t.cmd = nil
+		t.cancel = nil
 	}
 }
 

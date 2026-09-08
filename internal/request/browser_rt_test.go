@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -128,6 +129,49 @@ func TestBrowserRoundTripperDetectsExitedForwarderWithoutReadinessTimeout(t *tes
 	}
 	if !strings.Contains(err.Error(), "forwarder-stdout") || !strings.Contains(err.Error(), "startup-stderr") {
 		t.Fatalf("startup diagnostics were not isolated and preserved: %v", err)
+	}
+}
+
+func TestBrowserRoundTripperProbeReapsForwarderDescendants(t *testing.T) {
+	if os.PathSeparator == '\\' {
+		t.Skip("process-group fixture is POSIX-only")
+	}
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 is unavailable")
+	}
+	dir := t.TempDir()
+	launcher := filepath.Join(dir, "python")
+	script := `#!/bin/sh
+port=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--port" ]; then port="$2"; shift; fi
+  shift
+done
+"` + python + `" -c '
+import http.server, sys
+class Handler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+    def log_message(self, *args):
+        pass
+http.server.HTTPServer(("127.0.0.1", int(sys.argv[1])), Handler).serve_forever()
+' "$port" &
+wait
+`
+	if err := os.WriteFile(launcher, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OPEN_SURFACE_PYTHON", launcher)
+	rt := NewBrowserRoundTripper(BrowserRoundTripperConfig{Target: "mysite"})
+
+	begin := time.Now()
+	if err := rt.Probe(); err != nil {
+		t.Fatalf("probe failed: %v", err)
+	}
+	if elapsed := time.Since(begin); elapsed > 3*time.Second {
+		t.Fatalf("probe left a descendant holding its pipes for %s", elapsed)
 	}
 }
 
