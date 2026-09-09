@@ -9,7 +9,6 @@ import (
 	"io"
 	"strconv"
 	"strings"
-	"unicode/utf8"
 )
 
 // maxRPCPayloadBytes caps the Content-Length accepted from an MCP client to
@@ -275,12 +274,11 @@ func formatToolResult(resp *HTTPResponse, maxBytes int) (string, bool) {
 	}
 
 	if maxBytes > 0 && len(bodyText) > maxBytes {
-		// Walk back to a UTF-8 code-point boundary so we don't split a multi-byte rune.
-		cut := maxBytes
-		for cut > 0 && !utf8.RuneStart(bodyText[cut]) {
-			cut--
-		}
-		bodyText = bodyText[:cut] + "\n... truncated ..."
+		return fmt.Sprintf(
+			"tool result is %d bytes and exceeds configured --max-result-bytes=%d; no partial result was returned",
+			len(bodyText),
+			maxBytes,
+		), true
 	}
 	return bodyText, isError
 }

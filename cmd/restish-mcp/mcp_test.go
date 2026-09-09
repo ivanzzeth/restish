@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -595,6 +597,30 @@ func TestParseArgsRequestTimeout(t *testing.T) {
 	}
 }
 
+func TestParseArgsDefaultsDoNotCapOperationDurationOrResultSize(t *testing.T) {
+	cfg, err := ParseArgs([]string{"serve", "demo"})
+	if err != nil {
+		t.Fatalf("ParseArgs: %v", err)
+	}
+	if got := cfg.Options.RequestTimeout; got != 0 {
+		t.Fatalf("RequestTimeout = %d, want caller-owned deadline (0)", got)
+	}
+	if got := cfg.Options.MaxResultBytes; got != 0 {
+		t.Fatalf("MaxResultBytes = %d, want complete results (0)", got)
+	}
+}
+
+func TestParseArgsRejectsNegativeIntegrityBounds(t *testing.T) {
+	for _, args := range [][]string{
+		{"serve", "--max-result-bytes", "-1", "demo"},
+		{"serve", "--request-timeout", "-1", "demo"},
+	} {
+		if _, err := ParseArgs(args); err == nil {
+			t.Fatalf("ParseArgs(%q) accepted a negative integrity bound", args)
+		}
+	}
+}
+
 func TestPluginClientSendsHTTPRequestTimeout(t *testing.T) {
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
@@ -688,8 +714,8 @@ func TestRunServeToolCall(t *testing.T) {
 		if req.URI != "demo/items/42" {
 			t.Fatalf("unexpected request URI: %s", req.URI)
 		}
-		if req.Timeout != 60 {
-			t.Fatalf("request timeout = %d, want default 60", req.Timeout)
+		if req.Timeout != 0 {
+			t.Fatalf("request timeout = %d, want caller-owned deadline (0)", req.Timeout)
 		}
 		return &HTTPResponse{
 			Status: 200,
@@ -714,6 +740,92 @@ func TestRunServeToolCall(t *testing.T) {
 	text := content[0].(map[string]any)["text"].(string)
 	if !strings.Contains(text, `"name": "example"`) {
 		t.Fatalf("expected tool body in result, got:\n%s", text)
+	}
+}
+
+func TestRunServePreservesCompleteLargeJSONResult(t *testing.T) {
+	spec := loadTestSpec(t, "demo", `{
+	  "openapi": "3.1.0",
+	  "info": {"title": "Demo", "version": "1.0.0"},
+	  "paths": {"/large": {"get": {"operationId": "getLarge"}}}
+	}`)
+	sentinel := "TAIL-SENTINEL"
+	payload := map[string]any{
+		"data":     strings.Repeat("x", 20*1024),
+		"sentinel": sentinel,
+	}
+	endpoint := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// The MCP transport must not replace the caller's operation deadline with
+		// its own fixed budget. A real caller remains free to cancel the process.
+		time.Sleep(100 * time.Millisecond)
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(payload); err != nil {
+			t.Errorf("encode local endpoint response: %v", err)
+		}
+	}))
+	defer endpoint.Close()
+
+	var stdin bytes.Buffer
+	writeFrame(&stdin, mustJSON(t, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      1,
+		"method":  "tools/call",
+		"params": map[string]any{
+			"name":      "getLarge",
+			"arguments": map[string]any{},
+		},
+	}))
+
+	var stdout bytes.Buffer
+	err := Run(&stdin, &stdout, func(string) (*APISpec, error) {
+		return spec, nil
+	}, func(req *HTTPRequest) (*HTTPResponse, error) {
+		if req.Timeout != 0 {
+			t.Fatalf("MCP imposed an inner request timeout: %d", req.Timeout)
+		}
+		response, err := endpoint.Client().Get(endpoint.URL)
+		if err != nil {
+			return nil, err
+		}
+		defer response.Body.Close()
+		var body map[string]any
+		if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+			return nil, err
+		}
+		return &HTTPResponse{Status: response.StatusCode, Body: body}, nil
+	}, []string{"serve", "demo"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	responses := readResponses(t, stdout.Bytes())
+	result := responses[0]["result"].(map[string]any)
+	if result["isError"] == true {
+		t.Fatalf("large successful response became an MCP error: %#v", result)
+	}
+	text := result["content"].([]any)[0].(map[string]any)["text"].(string)
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(text), &decoded); err != nil {
+		t.Fatalf("large MCP result is not complete JSON: %v\nresult tail: %q", err, text[max(0, len(text)-80):])
+	}
+	if got := decoded["sentinel"]; got != sentinel {
+		t.Fatalf("large MCP result sentinel = %#v, want %q", got, sentinel)
+	}
+}
+
+func TestFormatToolResultReportsOversizeAsErrorInsteadOfTruncatingSuccess(t *testing.T) {
+	text, isError := formatToolResult(&HTTPResponse{
+		Status: 200,
+		Body:   map[string]any{"payload": strings.Repeat("x", 128)},
+	}, 32)
+	if !isError {
+		t.Fatalf("oversize result was reported as success: %q", text)
+	}
+	if strings.Contains(text, "... truncated ...") {
+		t.Fatalf("oversize result was silently truncated: %q", text)
+	}
+	if !strings.Contains(text, "exceeds configured --max-result-bytes=32") {
+		t.Fatalf("oversize result did not report its boundary: %q", text)
 	}
 }
 
