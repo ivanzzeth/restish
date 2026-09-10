@@ -87,7 +87,7 @@ type forwardResponse struct {
 // the response from the browser's actual reply. Status codes are passed
 // through untouched (406 etc. are not swallowed).
 func (t *BrowserRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	t.once.Do(t.start)
+	t.once.Do(func() { t.start(req.Context()) })
 	if t.err != nil {
 		return nil, t.err
 	}
@@ -203,7 +203,7 @@ func (t *BrowserRoundTripper) Close() error {
 // Generated-runtime doctors use this to catch import, bind and lifecycle
 // failures before the first authorized platform call.
 func (t *BrowserRoundTripper) Probe() error {
-	t.once.Do(t.start)
+	t.once.Do(func() { t.start(context.Background()) })
 	if t.err != nil {
 		return t.err
 	}
@@ -238,34 +238,42 @@ func (t *BrowserRoundTripper) serialize(req *http.Request) (map[string]any, erro
 }
 
 // start spawns the forwarder and waits until it is ready. Called once.
-func (t *BrowserRoundTripper) start() {
+func (t *BrowserRoundTripper) start(parent context.Context) {
+	// Frozen runtimes may need time to unpack on a cold host. The caller's
+	// deadline still bounds startup, including retries and health requests.
+	ctx, cancel := context.WithTimeout(parent, 120*time.Second)
+	defer cancel()
+	attempts := 2
 	if t.cfg.Port != 0 {
-		t.port = t.cfg.Port
-		if t.spawnAndWait() {
-			return
-		}
-		t.kill()
-		t.err = forwarderError(t.cfg.Port, t.spawnErr, t.stderr.String())
-		return
+		attempts = 1
 	}
-	// Pick a free port, retrying once if the forwarder fails to come up.
-	for attempt := 0; attempt < 2; attempt++ {
-		t.port = randomPort()
-		if t.spawnAndWait() {
+	for attempt := 0; attempt < attempts; attempt++ {
+		if ctx.Err() != nil {
+			break
+		}
+		t.port = t.cfg.Port
+		if t.port == 0 {
+			t.port = randomPort()
+		}
+		if t.spawnAndWait(ctx) {
 			return
 		}
 		t.kill()
+	}
+	if ctx.Err() != nil {
+		t.err = fmt.Errorf("browser forwarder startup: %w", ctx.Err())
+		return
 	}
 	t.err = forwarderError(t.port, t.spawnErr, t.stderr.String())
 }
 
-func (t *BrowserRoundTripper) spawnAndWait() bool {
+func (t *BrowserRoundTripper) spawnAndWait(ctx context.Context) bool {
 	if err := t.spawn(t.port); err != nil {
 		t.spawnErr = err
 		return false
 	}
 	t.spawnErr = nil
-	return t.waitReady()
+	return t.waitReady(ctx)
 }
 
 func (t *BrowserRoundTripper) spawn(port int) error {
@@ -408,22 +416,31 @@ func (b *tailBuffer) String() string {
 	return strings.TrimSpace(string(b.buf))
 }
 
-func (t *BrowserRoundTripper) waitReady() bool {
-	deadline := time.Now().Add(30 * time.Second)
+func (t *BrowserRoundTripper) waitReady(ctx context.Context) bool {
 	healthURL := fmt.Sprintf("http://127.0.0.1:%d/healthz", t.port)
 	client := &http.Client{Timeout: 2 * time.Second}
-	for time.Now().Before(deadline) {
+	ticker := time.NewTicker(300 * time.Millisecond)
+	defer ticker.Stop()
+	for ctx.Err() == nil {
 		if t.processExited() {
 			return false
 		}
-		resp, err := client.Get(healthURL)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, healthURL, nil)
+		if err != nil {
+			return false
+		}
+		resp, err := client.Do(req)
 		if err == nil {
 			_ = resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
 				return true
 			}
 		}
-		time.Sleep(300 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+		}
 	}
 	return false
 }

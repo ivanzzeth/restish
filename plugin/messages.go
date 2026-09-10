@@ -1,5 +1,9 @@
 package plugin
 
+// MaxStreamDataBytes is the per-frame stdout/stderr payload limit.
+// Stream writers split larger writes without limiting the complete response.
+const MaxStreamDataBytes = 1 << 20
+
 // Message type constants for the command plugin protocol.
 // Use these instead of bare strings to avoid typos; a mismatched type string
 // causes the host or plugin to silently ignore the message.

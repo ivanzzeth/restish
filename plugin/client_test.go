@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -62,6 +63,52 @@ func TestCommandClientWriteStderrWritesStderrDataMessage(t *testing.T) {
 	}
 	if msg.Type != MsgTypeStderrData || string(msg.Data) != "oops" {
 		t.Fatalf("message = %#v", msg)
+	}
+}
+
+func TestCommandClientChunksConcurrentStreamWrites(t *testing.T) {
+	for _, kind := range []string{MsgTypeStdoutData, MsgTypeStderrData} {
+		t.Run(kind, func(t *testing.T) {
+			var out bytes.Buffer
+			client := NewCommandClient(bytes.NewReader(nil), &out)
+			write := client.WriteStdout
+			if kind == MsgTypeStderrData {
+				write = client.WriteStderr
+			}
+			a := bytes.Repeat([]byte("a"), 2*MaxStreamDataBytes+17)
+			b := bytes.Repeat([]byte("b"), 2*MaxStreamDataBytes+19)
+			var wg sync.WaitGroup
+			for _, data := range [][]byte{a, b} {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					if err := write(data); err != nil {
+						t.Errorf("write: %v", err)
+					}
+				}()
+			}
+			wg.Wait()
+			dec := NewDecoder(&out)
+			var result []byte
+			for {
+				var msg StdoutDataMsg
+				err := dec.ReadMessage(&msg)
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if msg.Type != kind || len(msg.Data) > MaxStreamDataBytes {
+					t.Fatalf("invalid stream frame: type=%s size=%d", msg.Type, len(msg.Data))
+				}
+				result = append(result, msg.Data...)
+			}
+			if !bytes.Equal(result, append(append([]byte{}, a...), b...)) &&
+				!bytes.Equal(result, append(append([]byte{}, b...), a...)) {
+				t.Fatal("stream writes lost bytes or interleaved chunks")
+			}
+		})
 	}
 }
 

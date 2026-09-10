@@ -23,6 +23,34 @@ import (
 	"github.com/spf13/cobra"
 )
 
+func TestSDKLargeStdoutPassesHostFrameLimit(t *testing.T) {
+	var wire, stdout bytes.Buffer
+	payload := bytes.Repeat([]byte("complete-response"), 200000)
+	client := pluginwire.NewCommandClient(bytes.NewReader(nil), &wire)
+	if err := client.WriteStdout(payload); err != nil {
+		t.Fatal(err)
+	}
+	cli := &CLI{Stdout: &stdout, Stderr: io.Discard}
+	cmd := &cobra.Command{Use: "test"}
+	decoder := pluginwire.NewDecoder(&wire)
+	for {
+		raw, err := decoder.ReadRaw()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = cli.handleCommandPluginMessage(cmd, context.Background(), nil, nil, pluginwire.MsgTypeStdoutData, raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !bytes.Equal(stdout.Bytes(), payload) {
+		t.Fatalf("response was not preserved: got %d bytes, want %d", stdout.Len(), len(payload))
+	}
+}
+
 func TestHandleCommandPluginMessageRejectsMalformedDone(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

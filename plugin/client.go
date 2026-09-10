@@ -489,14 +489,32 @@ func setRequestID(msg any, requestID string) {
 	}
 }
 
-// WriteStdout writes data to the user's terminal via the host.
+// WriteStdout writes data to the user's terminal via bounded host frames.
 func (c *CommandClient) WriteStdout(data []byte) error {
-	return c.WriteMessage(StdoutDataMsg{Type: MsgTypeStdoutData, Data: append([]byte(nil), data...)})
+	return c.writeStream(MsgTypeStdoutData, data)
 }
 
-// WriteStderr writes data to the user's terminal stderr via the host.
+// WriteStderr writes data to the user's terminal stderr via bounded host frames.
 func (c *CommandClient) WriteStderr(data []byte) error {
-	return c.WriteMessage(StderrDataMsg{Type: MsgTypeStderrData, Data: append([]byte(nil), data...)})
+	return c.writeStream(MsgTypeStderrData, data)
+}
+
+func (c *CommandClient) writeStream(kind string, data []byte) error {
+	// Keep all chunks of one write contiguous, including concurrent callers.
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	for len(data) > 0 {
+		size := min(len(data), MaxStreamDataBytes)
+		var msg any = StdoutDataMsg{Type: kind, Data: data[:size]}
+		if kind == MsgTypeStderrData {
+			msg = StderrDataMsg{Type: kind, Data: data[:size]}
+		}
+		if err := WriteMessage(c.out, msg); err != nil {
+			return err
+		}
+		data = data[size:]
+	}
+	return nil
 }
 
 // Warn sends a warning message to the host, which displays it to the user

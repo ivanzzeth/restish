@@ -72,7 +72,7 @@ Use "restish mcp [command] --help" for more information about a command.
 ```text
 Serve registered APIs over the Model Context Protocol.
 
-Discovery always lists every OpenAPI operation. By default, calls to POST, PUT, PATCH, and DELETE tools are rejected. Use `--allow-write-tools` only when an outer authorization boundary or trusted operator controls mutations; use `--read-only` to reject every call except GET and HEAD. Neither flag changes tools/list.
+Discovery always lists every OpenAPI operation. By default, calls to POST, PUT, PATCH, and DELETE tools are rejected. Use `--allow-write-tools` only when an outer authorization boundary or trusted operator controls mutations; use `--read-only` to reject every call except GET and HEAD. Neither flag changes tools/list. Successful responses are complete by default, and operation deadlines belong to the MCP caller. A positive `--max-result-bytes` turns oversize responses into explicit errors rather than truncating them.
 
 Usage:
   restish mcp serve [flags] <api...>
@@ -82,8 +82,8 @@ Examples:
   restish mcp serve github --allow-write-tools
 
 Flags:
-  --max-result-bytes int     Maximum tool result payload size
-  --request-timeout int      Per-tool HTTP request timeout in seconds (0 disables)
+  --max-result-bytes int     Maximum tool result payload size (0 disables)
+  --request-timeout int      Per-tool HTTP request timeout in seconds (0 leaves deadline to MCP caller)
   --read-only                Reject calls other than GET/HEAD operations
   --allow-write-tools        Permit calls to POST, PUT, PATCH, and DELETE operations
   -h, --help                 help for serve

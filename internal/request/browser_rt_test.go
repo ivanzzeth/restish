@@ -103,6 +103,33 @@ func TestBrowserRoundTripperHonorsCallerCancellation(t *testing.T) {
 	}
 }
 
+func TestBrowserRoundTripperCancelsStartupAndReapsProcess(t *testing.T) {
+	if os.PathSeparator == '\\' {
+		t.Skip("shell fixture is POSIX-only")
+	}
+	launcher := filepath.Join(t.TempDir(), "python")
+	if err := os.WriteFile(launcher, []byte("#!/bin/sh\nexec sleep 60\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OPEN_SURFACE_PYTHON", launcher)
+	rt := NewBrowserRoundTripper(BrowserRoundTripperConfig{Target: "mysite"})
+	defer rt.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.example.com/x", nil)
+	begin := time.Now()
+	_, err := rt.RoundTrip(req)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("startup lost caller deadline: %v", err)
+	}
+	if elapsed := time.Since(begin); elapsed > time.Second {
+		t.Fatalf("startup cancellation took %s", elapsed)
+	}
+	if rt.cmd != nil || !rt.reaped {
+		t.Fatal("canceled startup left its subprocess unreaped")
+	}
+}
+
 func TestBrowserRoundTripperDetectsExitedForwarderWithoutReadinessTimeout(t *testing.T) {
 	if os.PathSeparator == '\\' {
 		t.Skip("shell fixture is POSIX-only")

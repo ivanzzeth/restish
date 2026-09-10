@@ -18,7 +18,7 @@ import (
 const maxCommandPluginDiscoveryOutputBytes = 1 << 20
 const maxCommandPluginStderrBytes = 64 << 10
 const maxCommandPluginInboundMessageBytes = 64 << 20
-const maxCommandPluginDataBytes = 1 << 20
+const maxCommandPluginDataBytes = pluginwire.MaxStreamDataBytes
 
 func loadCommandPluginCommands(ctx context.Context, path string) ([]pluginwire.CommandDecl, error) {
 	timeout := commandPluginDiscoveryTimeout()

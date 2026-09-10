@@ -240,3 +240,9 @@ and tests in
 One detail worth preserving is that command plugins add commands at root-command
 construction time, not through late dynamic dispatch. That keeps help output,
 completion, and command discovery aligned with built-in commands.
+
+Stdout and stderr data frames are limited to 1 MiB each. The SDK splits larger
+writes into ordered frames while holding the write lock for the entire write,
+so concurrent writers cannot interleave response bytes. This frame limit is not
+a limit on the complete MCP response. The host continues to reject oversized
+individual frames.

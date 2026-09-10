@@ -231,6 +231,10 @@ APIOperation is the host's resolved, config-aware representation of one OpenAPI 
 
 CBOR: `id`; type: `string`; required: yes
 
+**`SourceID`**
+
+CBOR: `source_id`; type: `string`; required: yes
+
 **`Method`**
 
 CBOR: `method`; type: `string`; required: yes

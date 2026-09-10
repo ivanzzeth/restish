@@ -388,3 +388,13 @@ Useful implementation seams are:
 
 Those seams are also the best places to add tests, because they let the design
 be validated without depending on full end-to-end CLI snapshots for every case.
+
+## Browser forwarder startup
+
+The browser transport starts one owned forwarder subprocess lazily. Readiness
+checks and retries share a 120-second cold-start budget, further bounded by the
+original request context. Canceling startup reaps the process tree before
+returning the context error. An exited process is detected promptly and its
+startup diagnostics are retained; a timeout alone is not evidence that browser
+dependencies are missing. Probe uses the same bounded readiness path and closes
+the process without sending an upstream request.
