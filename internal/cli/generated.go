@@ -491,7 +491,7 @@ func (c *CLI) buildOperationCommand(apiName, examplePrefix string, op spec.Opera
 			}
 			acceptOverride := c.generatedOperationAcceptHeader(op.ResponseMediaTypes, op.ResponseMediaType)
 			rawBinaryBody := op.Help.Request != nil && op.Help.Request.RawBinary
-			return c.runGeneratedOp(cmd, apiName, op.Path, op.OperationServer, op.Method, op.RequestMediaType, acceptOverride, op.RequestMultipartContentTypes, op.Help, op.BodyRequired, rawBinaryBody, op.NoAuth, op.OptionalAuth, op.CredentialAlternatives, required, optional, args)
+			return c.runGeneratedOp(cmd, apiName, op.Path, op.OperationServer, op.Method, op.RequestMediaType, acceptOverride, op.RequestMultipartContentTypes, op.Help, op.BodyRequired, rawBinaryBody, op.NoAuth, op.OptionalAuth, op.CredentialAlternatives, required, optional, allParams, args)
 		},
 	}
 	if candidates := authOverrideCandidates(op.OptionalAuth, op.CredentialAlternatives); len(candidates) > 0 {
@@ -511,6 +511,7 @@ func (c *CLI) buildOperationCommand(apiName, examplePrefix string, op spec.Opera
 		cmd.Annotations[generatedOperationRequiredTypesAnnotation] = strings.Join(types, "\n")
 	}
 	cmd.Flags().Bool("help-all", false, "Show all inherited Restish flags in help")
+	cmd.Flags().StringArray("param", nil, "Named API parameter in name=value form (repeatable; use in.name=value when ambiguous)")
 	cmd.SetUsageTemplate(generatedOperationUsageTemplate)
 	if !op.HasBody {
 		cmd.Args = generatedOperationArgs(required, false)
@@ -903,6 +904,9 @@ func generatedOperationArgs(required []*paramInfo, hasBody bool) func(*cobra.Com
 			return nil
 		}
 		if generateBody, _ := cmd.Flags().GetBool("rsh-generate-body"); generateBody {
+			return nil
+		}
+		if cmd.Flags().Changed("param") {
 			return nil
 		}
 		requiredCount := len(required)
@@ -1383,6 +1387,7 @@ func (c *CLI) runGeneratedOp(
 	optionalAuth bool,
 	credentialAlternatives []spec.CredentialAlternative,
 	required, optional []*paramInfo,
+	allParams map[string]*paramInfo,
 	args []string,
 ) error {
 	// Substitute required params into the path, query string, and headers.
@@ -1390,16 +1395,35 @@ func (c *CLI) runGeneratedOp(
 	var query []generatedQueryParam
 	var extraHeaders []string
 	bodyArgStart := len(required)
-
-	for i, p := range required {
-		val := args[i]
-		if err := validateGeneratedParamValues(p, []string{val}, "argument "+p.flagName); err != nil {
-			return err
+	named, namedMode, err := generatedNamedParamValues(cmd, allParams)
+	if err != nil {
+		return err
+	}
+	if namedMode {
+		bodyArgStart = 0
+		for _, p := range required {
+			values := named[p]
+			if len(values) == 0 {
+				return fmt.Errorf("missing required named parameter %q; provide --param %s=<value>", p.name, p.name)
+			}
+			if err := validateGeneratedParamValues(p, values, "--param "+p.name); err != nil {
+				return err
+			}
+			path, query, extraHeaders, err = addGeneratedParam(path, query, extraHeaders, p, values)
+			if err != nil {
+				return err
+			}
 		}
-		var err error
-		path, query, extraHeaders, err = addGeneratedParam(path, query, extraHeaders, p, []string{val})
-		if err != nil {
-			return err
+	} else {
+		for i, p := range required {
+			val := args[i]
+			if err := validateGeneratedParamValues(p, []string{val}, "argument "+p.flagName); err != nil {
+				return err
+			}
+			path, query, extraHeaders, err = addGeneratedParam(path, query, extraHeaders, p, []string{val})
+			if err != nil {
+				return err
+			}
 		}
 	}
 
@@ -1410,6 +1434,19 @@ func (c *CLI) runGeneratedOp(
 	contentChildren := map[*paramInfo]map[string]any{}
 	var contentChildParents []*paramInfo
 	for _, p := range optional {
+		if values := named[p]; len(values) > 0 {
+			if cmd.Flags().Changed(p.flagName) {
+				return fmt.Errorf("parameter %q was supplied by both --param and --%s", p.name, p.flagName)
+			}
+			if err := validateGeneratedParamValues(p, values, "--param "+p.name); err != nil {
+				return err
+			}
+			path, query, extraHeaders, err = addGeneratedParam(path, query, extraHeaders, p, values)
+			if err != nil {
+				return err
+			}
+			continue
+		}
 		if !cmd.Flags().Changed(p.flagName) {
 			continue
 		}
@@ -1514,6 +1551,56 @@ func (c *CLI) runGeneratedOp(
 			Override:               gf.Auth,
 		},
 	})
+}
+
+func generatedNamedParamValues(cmd *cobra.Command, allParams map[string]*paramInfo) (map[*paramInfo][]string, bool, error) {
+	raw, err := cmd.Flags().GetStringArray("param")
+	if err != nil {
+		return nil, false, err
+	}
+	if len(raw) == 0 {
+		return map[*paramInfo][]string{}, false, nil
+	}
+	byName := map[string][]*paramInfo{}
+	for _, p := range allParams {
+		if p == nil || p.parent != nil {
+			continue
+		}
+		byName[p.name] = append(byName[p.name], p)
+	}
+	values := map[*paramInfo][]string{}
+	for _, item := range raw {
+		name, value, ok := strings.Cut(item, "=")
+		if !ok || name == "" {
+			return nil, true, fmt.Errorf("invalid --param %q: expected name=value", item)
+		}
+		var candidates []*paramInfo
+		if in, parameter, qualified := strings.Cut(name, "."); qualified {
+			candidate := allParams[paramKey(in, parameter)]
+			if candidate != nil {
+				candidates = []*paramInfo{candidate}
+			}
+		} else {
+			candidates = byName[name]
+		}
+		if len(candidates) == 0 {
+			return nil, true, fmt.Errorf("unknown --param %q", name)
+		}
+		if len(candidates) > 1 {
+			locations := make([]string, 0, len(candidates))
+			for _, candidate := range candidates {
+				locations = append(locations, candidate.in+"."+candidate.name)
+			}
+			sort.Strings(locations)
+			return nil, true, fmt.Errorf("ambiguous --param %q; use one of: %s", name, strings.Join(locations, ", "))
+		}
+		p := candidates[0]
+		if len(values[p]) > 0 && p.typ != "array" {
+			return nil, true, fmt.Errorf("parameter %q does not accept repeated --param values", name)
+		}
+		values[p] = append(values[p], value)
+	}
+	return values, true, nil
 }
 
 func generatedFlagValues(cmd *cobra.Command, p *paramInfo) ([]string, error) {

@@ -4254,6 +4254,45 @@ func TestGeneratedCommandRequiredQueryIsRequiredArgument(t *testing.T) {
 	}
 }
 
+func TestGeneratedCommandNamedParamsAcceptLeadingHyphenValues(t *testing.T) {
+	var gotQuery string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/reports", func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `[]`)
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })
+
+	env := setupEnvWithSpec(t, mux, func(baseURL string) string {
+		return openAPIGetOperationSpec(baseURL, "Test API", "/reports", "listReports",
+			openAPIParams(
+				openAPIParam("page[size]", "query", true, `{"type":"integer"}`),
+				openAPIParam("sort", "query", true, `{"type":"string"}`),
+			),
+		)
+	})
+
+	c := env.newCLI()
+	if err := c.Run([]string{
+		"restish", "tapi", "list-reports",
+		"--param", "page[size]=1",
+		"--param", "sort=-record_date",
+	}); err != nil {
+		t.Fatalf("named parameters failed: %v", err)
+	}
+	values, err := url.ParseQuery(gotQuery)
+	if err != nil {
+		t.Fatalf("ParseQuery(%q): %v", gotQuery, err)
+	}
+	if got := values.Get("page[size]"); got != "1" {
+		t.Fatalf("page[size] = %q, want 1", got)
+	}
+	if got := values.Get("sort"); got != "-record_date" {
+		t.Fatalf("sort = %q, want -record_date", got)
+	}
+}
+
 func TestGeneratedCommandRequiredQueryAPIKeySatisfiedByAuth(t *testing.T) {
 	var gotQuery string
 	mux := http.NewServeMux()
